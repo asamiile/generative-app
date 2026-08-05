@@ -1,0 +1,28 @@
+# Release automation via Release Please.
+# On push to main, opens/updates a Release PR from Conventional Commits.
+# Merging that PR bumps the version in .release-please-manifest.json,
+# updates CHANGELOG.md, tags vX.Y.Z, and creates a GitHub Release.
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Release Please
+        uses: googleapis/release-please-action@v5
+        with:
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
