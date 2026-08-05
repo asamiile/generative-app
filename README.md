@@ -2,39 +2,29 @@
 
 A local web app that generates photorealistic images from short text prompts using the Gemini API.
 
-## Development Environment Setup
+- Runs entirely locally via Docker / docker-compose — no cloud deployment required
+- Two-step generation flow: 4 low-resolution previews → pick one → finish it in 4K
+- Generated images and history persist across restarts (Docker volumes + SQLite)
+- Photorealistic output only, enforced via prompt engineering (no anime/illustration styles)
 
-### Requirements
+## Setup
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-
-### URLs
-
-| Service                | URL                         | Port |
-| ----------------------- | ---------------------------- | ---- |
-| Frontend (Next.js)      | http://localhost:3000        | 3000 |
-| API (FastAPI)           | http://localhost:8000        | 8000 |
-| API Docs (Swagger UI)   | http://localhost:8000/docs   | 8000 |
-
-### Running locally
-
-```bash
-docker compose up
-
-# Run in the background
-# Logs: docker compose logs -f
-docker compose up -d
-
-# First run, or after changing a Dockerfile
-docker compose up --build
-```
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+2. Clone this repository.
+3. [Set up the Gemini API](#gemini-api-setup) (issue a key, set a spend cap, configure the env files).
+4. Run it locally:
+   ```bash
+   docker compose up --build
+   ```
+5. Open [http://localhost:3000](http://localhost:3000) and generate an image.
 
 ### Gemini API setup
 
 1. Issue an API key at [Google AI Studio](https://aistudio.google.com/apikey).
    - Image generation (`gemini-3-pro-image`) requires Cloud Billing to be enabled on the linked project; the free tier does not cover it.
-2. Set `GEMINI_API_KEY` in `backend/.env`.
-3. Set a shared secret in `APP_API_TOKEN` (must match between `backend/.env` and `frontend/.env.local`), and adjust `RATE_LIMIT_PER_HOUR` if needed.
+2. **Set a monthly spend cap for the project.** In AI Studio, open the **Spend** tab for your project and set a dollar limit — this blocks further API requests once the cap is reached (note: enforcement has a ~10 minute delay, so a burst of requests right at the cap may still incur a small amount of extra charge). This is strongly recommended before running this app with a real key, since `/api/generate/preview` and `/api/generate/finalize` call paid, per-request billed models. A [Cloud Billing budget alert](https://cloud.google.com/billing/docs/how-to/budgets) (email notification only, does not block requests) is a good addition but not a substitute for the spend cap.
+3. Set `GEMINI_API_KEY` in `backend/.env`.
+4. Set a shared secret in `APP_API_TOKEN` (must match between `backend/.env` and `frontend/.env.local`), and adjust `RATE_LIMIT_PER_HOUR` if needed.
 
 Templates: [backend/.env.example](backend/.env.example), [frontend/.env.local.example](frontend/.env.local.example)
 
@@ -45,6 +35,39 @@ curl -s -X POST http://localhost:8000/api/generate/preview \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <APP_API_TOKEN>" \
   -d '{"prompt": "a quiet hot spring inn surrounded by mountains"}'
+```
+
+## Development
+
+### URLs
+
+| Service                | URL                         | Port |
+| ----------------------- | ---------------------------- | ---- |
+| Frontend (Next.js)      | http://localhost:3000        | 3000 |
+| API (FastAPI)           | http://localhost:8000        | 8000 |
+| API Docs (Swagger UI)   | http://localhost:8000/docs   | 8000 |
+
+### Development commands
+
+```bash
+# Run in the foreground (see startup logs directly)
+docker compose up
+
+# Run in the background
+docker compose up -d
+
+# Rebuild after changing a Dockerfile or dependencies
+docker compose up -d --build
+
+# Rebuild a single service only
+docker compose up -d --build backend
+docker compose up -d --build frontend
+
+# Follow logs
+docker compose logs -f
+
+# Stop
+docker compose down
 ```
 
 ### Database migrations
