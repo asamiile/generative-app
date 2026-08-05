@@ -56,6 +56,15 @@ Schema changes are managed with Alembic. On startup, the backend bootstraps a fr
 docker compose exec backend alembic revision -m "describe the change"
 ```
 
+### Running backend tests
+
+Tests cover auth and the `/api/generate/*` and `/api/history` endpoints, with Gemini API calls mocked (no real API key or cost involved). Each test runs against an isolated temporary SQLite database.
+
+```bash
+docker compose exec backend pip install -r requirements-dev.txt
+docker compose exec backend pytest
+```
+
 ## Release
 
 Releases are automated with [Release Please](https://github.com/googleapis/release-please). The version bump is determined by the Conventional Commits prefix in each commit message.

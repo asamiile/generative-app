@@ -159,9 +159,11 @@ def get_history(
 ) -> list[HistorySessionItem]:
     # 4K化済み・未4K化を問わず、セッション単位でプレビュー4枚をまとめて返す
     # (History画面でグループ表示するため)。
+    # created_atはSQLiteのCURRENT_TIMESTAMP(秒精度)のため、同一秒に複数作成されると
+    # 順序が不定になる。idを副次キーにして常に新しい順を保証する。
     session_stmt = (
         select(GenerationSession)
-        .order_by(GenerationSession.created_at.desc())
+        .order_by(GenerationSession.created_at.desc(), GenerationSession.id.desc())
         .limit(limit)
         .offset(offset)
     )
