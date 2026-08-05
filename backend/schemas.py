@@ -34,9 +34,12 @@ class FinalizeResponse(BaseModel):
     created_at: datetime
 
 
-class HistoryItem(BaseModel):
+class HistorySessionItem(BaseModel):
     session_id: int
     original_prompt: str
     enhanced_prompt: str
-    image_path: str
     created_at: datetime
+    final_image_path: str | None
+    final_status: GenerationStatus | None
+    selected_preview_id: int | None
+    previews: list[PreviewImageOut]

@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { Nav } from "@/components/Nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Generative App",
-  description: "実写限定・4K画像生成アプリ",
+  description: "Photorealistic 4K image generator",
 };
 
 export default function RootLayout({
@@ -12,8 +13,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ja">
-      <body className="min-h-screen bg-neutral-950 text-neutral-100">{children}</body>
+    <html lang="en">
+      <body className="min-h-screen bg-neutral-950 text-neutral-100">
+        <Nav />
+        {children}
+      </body>
     </html>
   );
 }

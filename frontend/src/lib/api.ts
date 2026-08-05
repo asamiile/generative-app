@@ -22,12 +22,15 @@ export type FinalizeResponse = {
   created_at: string;
 };
 
-export type HistoryItem = {
+export type HistorySessionItem = {
   session_id: number;
   original_prompt: string;
   enhanced_prompt: string;
-  image_path: string;
   created_at: string;
+  final_image_path: string | null;
+  final_status: GenerationStatus | null;
+  selected_preview_id: number | null;
+  previews: PreviewImage[];
 };
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -56,10 +59,14 @@ export function generateFinalize(sessionId: number, previewId: number): Promise<
   });
 }
 
-export function getHistory(limit = 20, offset = 0): Promise<HistoryItem[]> {
-  return apiFetch<HistoryItem[]>(`/api/history?limit=${limit}&offset=${offset}`);
+export function getHistory(limit = 20, offset = 0): Promise<HistorySessionItem[]> {
+  return apiFetch<HistorySessionItem[]>(`/api/history?limit=${limit}&offset=${offset}`);
 }
 
 export function resolveImageUrl(imagePath: string): string {
   return `${IMAGE_BASE_URL}${imagePath}`;
+}
+
+export function downloadUrl(imagePath: string): string {
+  return `/api/download?path=${encodeURIComponent(imagePath)}`;
 }

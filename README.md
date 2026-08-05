@@ -56,6 +56,22 @@ Schema changes are managed with Alembic. On startup, the backend bootstraps a fr
 docker compose exec backend alembic revision -m "describe the change"
 ```
 
+## Release
+
+Releases are automated with [Release Please](https://github.com/googleapis/release-please). The version bump is determined by the Conventional Commits prefix in each commit message.
+
+| prefix | example | version change |
+| ------ | ------- | --------------- |
+| `fix:` | `fix: correct rate limit header` | v0.1.0 → v0.1.1 |
+| `feat:` | `feat: add preview selection UI` | v0.1.0 → v0.2.0 |
+| `feat!:` | `feat!: change API response shape` | v0.1.0 → v1.0.0 |
+
+### Release flow
+
+1. When commits land on `main`, GitHub Actions opens/updates a **Release PR** automatically.
+2. The Release PR includes the CHANGELOG and version bump.
+3. Merging the Release PR (into `main` only) automatically creates a **tag (e.g. v0.2.0) and a GitHub Release**.
+
 ## Author
 
 [Asami.K](https://asami.tokyo/)

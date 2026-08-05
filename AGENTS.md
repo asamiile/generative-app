@@ -42,6 +42,20 @@ cd frontend && npm install && npm run dev
 8. **各コンテナーは非rootユーザーで実行し、ポートは`127.0.0.1`にのみバインドする。** ローカル実行時に意図せず外部公開しない。
 9. **DBスキーマ変更は必ずAlembicのマイグレーションファイルを作成する。** `Base.metadata.create_all()`だけで済ませない。外部キーには`ondelete`ポリシーと`index=True`を明記し、`status`系カラムは自由文字列ではなくEnumで値を制約する（`.agents/docs/DESIGN.md` 4章参照）。
 
+## コミットメッセージ規約
+
+リリースは[Release Please](https://github.com/googleapis/release-please)で自動化されている（`.github/workflows/release.yml`）。バージョンはコミットメッセージの**Conventional Commits**prefixから自動的に決まるため、prefixを必ずつけること。
+
+| prefix | 用途 | バージョン変化 |
+|--------|------|---------------|
+| `feat:` | 新機能 | minor |
+| `fix:` | バグ修正 | patch |
+| `feat!:` / `fix!:` | 破壊的変更 | major |
+| `chore:` / `docs:` / `refactor:` / `test:` | その他 | 変化なし |
+
+- Release PRは`main`にマージする（`main`以外へのマージではタグ・GitHub Releaseは作られない）。
+- 1コミットに複数の変更を詰め込みすぎない。prefixで表せる単位に分ける。
+
 ## コード規約
 
 - コメントは「なぜ」を説明する場合のみ最小限に。「何をしているか」の説明コメントは書かない。

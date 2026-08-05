@@ -25,7 +25,7 @@ from schemas import (
     FinalizeResponse,
     GeneratePreviewRequest,
     GeneratePreviewResponse,
-    HistoryItem,
+    HistorySessionItem,
     PreviewImageOut,
 )
 
@@ -85,7 +85,7 @@ async def generate_preview(
             candidate_index=index,
             image_path=image_path,
             status=GenerationStatus.SUCCESS if image_path else GenerationStatus.FAILED,
-            error_message=None if image_path else "プレビュー画像の生成に失敗しました",
+            error_message=None if image_path else "Failed to generate the preview image",
         )
         db.add(preview)
         previews.append(preview)
@@ -133,7 +133,7 @@ async def generate_finalize(
     session.selected_preview_id = preview.id
     session.final_image_path = image_path
     session.final_status = GenerationStatus.SUCCESS if image_path else GenerationStatus.FAILED
-    session.error_message = None if image_path else "本番(4K)画像の生成に失敗しました"
+    session.error_message = None if image_path else "Failed to generate the final 4K image"
     session.finalized_at = datetime.now(timezone.utc)
 
     db.commit()
@@ -149,29 +149,52 @@ async def generate_finalize(
 
 @app.get(
     "/api/history",
-    response_model=list[HistoryItem],
+    response_model=list[HistorySessionItem],
     dependencies=[Depends(verify_token)],
 )
 def get_history(
     limit: int = 20,
     offset: int = 0,
     db: DBSession = Depends(get_db),
-) -> list[HistoryItem]:
-    stmt = (
+) -> list[HistorySessionItem]:
+    # 4K化済み・未4K化を問わず、セッション単位でプレビュー4枚をまとめて返す
+    # (History画面でグループ表示するため)。
+    session_stmt = (
         select(GenerationSession)
-        .where(GenerationSession.final_status == GenerationStatus.SUCCESS)
         .order_by(GenerationSession.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
-    sessions = db.scalars(stmt).all()
+    sessions = db.scalars(session_stmt).all()
+
+    previews_by_session: dict[int, list[PreviewImage]] = {s.id: [] for s in sessions}
+    if sessions:
+        preview_stmt = (
+            select(PreviewImage)
+            .where(PreviewImage.session_id.in_(previews_by_session.keys()))
+            .order_by(PreviewImage.candidate_index)
+        )
+        for p in db.scalars(preview_stmt).all():
+            previews_by_session[p.session_id].append(p)
+
     return [
-        HistoryItem(
+        HistorySessionItem(
             session_id=s.id,
             original_prompt=s.original_prompt,
             enhanced_prompt=s.enhanced_prompt,
-            image_path=s.final_image_path,
             created_at=s.created_at,
+            final_image_path=s.final_image_path,
+            final_status=s.final_status,
+            selected_preview_id=s.selected_preview_id,
+            previews=[
+                PreviewImageOut(
+                    preview_id=p.id,
+                    candidate_index=p.candidate_index,
+                    image_path=p.image_path,
+                    status=p.status,
+                )
+                for p in previews_by_session[s.id]
+            ],
         )
         for s in sessions
     ]
