@@ -1,0 +1,35 @@
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=sqlite:////app/data/history.db
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - backend_data:/app/data
+      - backend_images:/app/static/images
+
+  frontend:
+    build:
+      context: ./frontend
+      target: deps
+    command: ["npm", "run", "dev", "--", "-H", "0.0.0.0"]
+    env_file:
+      - ./frontend/.env.local
+    environment:
+      - BACKEND_API_URL=http://backend:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  backend_data:
+  backend_images:
+  frontend_node_modules:

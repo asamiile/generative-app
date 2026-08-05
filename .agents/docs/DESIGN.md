@@ -17,7 +17,7 @@ Gemini APIを統合的に活用し、短いテキスト入力から高品質な�
 - データベース: SQLite (ファイル名: `history.db`)、Alembic（マイグレーション管理）
 - ファイルストレージ: ローカルディレクトリ (`backend/static/images/`)
 - 外部API: Gemini API (`google-genai` SDK, APIキー認証)
-  - プロンプト拡張用: `gemini-2.5-flash` または `gemini-3.5-flash-lite`(無料枠で運用)
+  - プロンプト拡張用: `gemini-3.6-flash`（無料枠で運用。`gemini-2.5-flash`は新規アカウントには提供されないため不採用。11章参照）
   - 画像生成用: `gemini-3-pro-image`(Nano Banana Pro)— 4K出力・高い指示追従性を優先して採用
 - レート制限: `slowapi`（FastAPI向け）
 - 実行環境: Docker / docker-compose（MVP環境構築の段階から導入。当面はローカル実行のみ）
@@ -114,7 +114,7 @@ project-root/
 
 - リクエスト: `{"prompt": "夜の東京"}`
 - 処理:
-  1. Gemini (`gemini-2.5-flash`) でプロンプトを実写用英語プロンプトに拡張。
+  1. Gemini (`gemini-3.6-flash`) でプロンプトを実写用英語プロンプトに拡張。
   2. `sessions`レコードを作成する（この時点では`final_*`はNULL）。
   3. 拡張後プロンプトで `gemini-3-pro-image` を **1K解像度・4回** 呼び出し、4枚のプレビューを生成。
      - Gemini APIの画像生成モデルは1回のリクエストで複数候補（`candidateCount`）を返す機能を提供していないため、**4回の個別呼び出しが必須**（[参考: Google AI Developers Forum](https://discuss.ai.google.dev/t/multiple-candidates-candidatecount-is-not-supported-for-image-generation-models/124694)）。
@@ -153,7 +153,7 @@ project-root/
 
 **プロンプト拡張の絶対ルール**
 
-`gemini-2.5-flash` 等に渡すシステムプロンプトには、以下の指示を必ず含めること。
+`gemini-3.6-flash` 等に渡すシステムプロンプトには、以下の指示を必ず含めること。
 
 - 「出力は画像生成用の英語プロンプトのみとすること」
 - 「必ず実写表現（Photorealistic, live-action style）となるようにプロンプトを構築すること」
@@ -171,7 +171,7 @@ project-root/
 
 **CORS設定**
 
-Next.jsのローカルサーバー（`http://localhost:3000`）からFastAPI（`http://localhost:8000`）へのリクエストを許可するCORSミドルウェアを設定すること。
+Next.jsのローカルサーバー（`http://localhost:3000`）からFastAPI（`http://localhost:8000`）へのリクエストを許可するCORSミドルウェアを設定すること。ブラウザからバックエンドへ直接叩くのは`/static/images/*`のみで、認証付きAPIはすべてNext.js側のBFF（5章参照）経由のため、実運用上は必須ではないが保険として設定する。
 
 **[変更]**
 - 画像生成パラメーター節を「プレビュー用」「本番用」に分けて明記。
@@ -228,7 +228,7 @@ MVPの環境構築段階からコンテナ化を行う。当面はクラウド�
 ## 9. Google AI Pro特典の活用について
 
 - 前提: Google AI Pro契約済み、決済方法登録済み、Gemini API用のAPIキーは今回新規発行する。
-- **テキスト拡張**: `gemini-2.5-flash`系は無料枠（Free of charge）で利用可能。課金・クレジット消費は発生しない。
+- **テキスト拡張**: `gemini-3.6-flash`系は無料枠（Free of charge）で利用可能。課金・クレジット消費は発生しない。
 - **画像生成**: 無料枠が存在せず、Cloud Billing有効化が必須。`gemini-3-pro-image`は1K出力が約$0.039/枚、4K出力が約$0.24/枚。
 - **コスト試算（1サイクル = プレビュー4枚＋本番1枚）**:
   - プレビュー: $0.039 × 4枚 ＝ 約$0.156
@@ -262,3 +262,34 @@ MVPの環境構築段階からコンテナ化を行う。当面はクラウド�
 - ステップ3に「プレビュー4枚の選択UI」を追加。
 - ステップ1で`docker-compose.yml`・`Dockerfile`の用意を追加。ステップ4で認証用の環境変数を追加。
 - ステップ5を`docker-compose up`での起動・疎通確認に更新。プレビュー生成・参照画像による本番生成の両方に対応。
+
+## 11. 実装時の補正（v5設計からの差分）
+
+MVPの雛形実装（`backend/` / `frontend/` / `docker-compose.yml`）および実APIキーでの疎通確認を行った際に、設計段階では気づかなかった技術的な問題が見つかったため補正した。
+
+1. **`sessions.selected_preview_id`にDBレベルのFK制約は付けない。**
+   4章では`preview_images.id`へのFK（`ondelete="SET NULL"`）としていたが、`preview_images.session_id → sessions.id`と合わせると循環参照になる。SQLiteはALTER TABLEでの制約後付けに対応していないため、`Base.metadata.create_all()`が失敗する。実装では`selected_preview_id`をFK制約なしの素のIntegerカラムとし、整合性はアプリケーション側（`/api/generate/finalize`のバリデーション）で保証する方針に変更した。
+2. **フロントのホスト公開ポートは3000のまま維持する（一度3001に変更したが、ユーザーの意向で差し戻した）。**
+   `docker-compose up`での動作確認時、ローカルの別プロジェクト（Remotion Studio）がホストの3000番を使用しており、IPv6優先解決で`http://localhost:3000`が意図せずそちらに繋がる事象を確認した。Remotion Studioを同時に起動している場合は`http://localhost:3000`が競合する可能性があるため、その場合は`http://127.0.0.1:3000`を明示するか、どちらかを停止すること。
+3. **APP_API_TOKENはブラウザに渡さず、Next.jsのRoute Handler（BFF）でのみ保持する。**
+   3章で「要検討」としていたBFF（`src/app/api/`）は、共有トークンをクライアントJSに埋め込まない（`NEXT_PUBLIC_*`にしない）ために採用を確定した。ブラウザは同一オリジンの`/api/generate/preview`・`/api/generate/finalize`・`/api/history`を叩き、Next.jsサーバーが`APP_API_TOKEN`を付与してFastAPIに転送する。画像表示用の`<img src>`のみ、認証不要な`/static/images/*`をバックエンドへ直接参照する。
+4. **`backend/alembic/env.py`の`fileConfig()`に`disable_existing_loggers=False`を指定する。**
+   デフォルト（`disable_existing_loggers=True`）のままだと、起動時の`init_db()`がAlembicのロギング設定を読み込む際に、`alembic.ini`に列挙していないロガー（uvicornのアクセスログ・エラーログを含む）がすべて無効化される。この状態だとアプリ側の例外がコンテナログに一切出力されず、障害調査ができなくなる。実際にこの状態でハマったため、起動直後に修正した。
+5. **プロンプト拡張モデルを`gemini-2.5-flash`→`gemini-3.6-flash`に変更。**
+   `gemini-2.5-flash`はモデル一覧には表示されるが、実際に呼び出すと`404 NOT_FOUND: This model models/gemini-2.5-flash is no longer available to new users.`が返る（新規アカウントには提供されていない）。実APIキーで`client.models.list()`を叩いて確認できる利用可能モデルの中から、GA版の`gemini-3.6-flash`に変更した。**モデル名は「ドキュメントやモデル一覧に載っている」ことと「実際にそのアカウントで呼び出せる」ことが一致しないことがあるため、実装時は必ずAPIキーで実行して確認すること。**
+6. **保存する画像ファイルの拡張子をレスポンスの`mime_type`から決定するよう変更（固定`.png`をやめた）。**
+   `gemini-3-pro-image`は`image_size`にPNG想定のパラメーターを渡していても実際はJPEGを返すことがある。固定`.png`のまま保存すると、実体とファイル名（延いてはStaticFilesが返すContent-Type）が食い違う。`services.py`で`inline_data.mime_type`から`mimetypes.guess_extension()`により拡張子を決定するよう修正した。
+7. **画像生成呼び出しに503(高負荷)向けの簡易リトライを追加。**
+   `gemini-3-pro-image`は実測でも`503 UNAVAILABLE`（高負荷）を複数回observed。`google.genai.errors.ServerError`を捕捉し、2秒→5秒→10秒の間隔で最大3回リトライする`_generate_content_with_retry`を`services.py`に追加した。
+8. **プレビュー1枚の失敗が4枚全体を巻き込まないよう修正。**
+   `asyncio.gather`はデフォルトで最初の例外が出た時点で他のタスクも巻き込んで失敗するため、`_generate_one_preview`内で`APIError`を捕捉し`None`を返す（呼び出し元が`status: failed`として個別に記録）よう修正した。
+9. **finalizeの失敗を`final_status: failed`として記録するよう修正。**
+   `generate_final_image`が例外を送出したままだと、`/api/generate/finalize`が未捕捉の500を返し、6章で定義していた「失敗時は`status: failed`として記録する」という設計と矛盾していた。`services.py`側で`APIError`を捕捉して`None`を返すよう統一し、`main.py`側の`final_status`判定ロジック（既存）がそのまま失敗記録として機能するようにした。
+
+**動作確認状況（実APIキー・Cloud Billing有効化済み）**
+- `docker compose build` → `docker compose up -d`: OK
+- `GET /health`: 200
+- `GET /api/history`（BFF経由・認証つき）: 200
+- `POST /api/generate/preview`: プロンプト拡張（`gemini-3.6-flash`）・1Kプレビュー4枚並列生成（`gemini-3-pro-image`）とも実際にGemini APIを呼び出し成功を確認。
+- `POST /api/generate/finalize`: 選択したプレビューを参照画像として渡す4K本番生成も成功を確認（出力は5632×3072、約43秒）。
+- `GET /api/history`: 生成済みセッションが降順で正しく返ることを確認。
