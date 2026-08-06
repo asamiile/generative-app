@@ -11,6 +11,25 @@ import {
 import { HistorySessionModal } from "@/components/HistorySessionModal";
 
 const PAGE_SIZE = 20;
+// The backend commits the sessions row before generating previews, so a session with
+// zero previews is normally still in progress. Cap how long we assume that, matching
+// the extended fetch timeout in lib/backendFetch.ts, so a session whose request
+// actually crashed doesn't show "Generating…" forever.
+const GENERATING_THRESHOLD_MS = 10 * 60 * 1000;
+
+function isLikelyGenerating(session: HistorySessionItem): boolean {
+  if (session.previews.length > 0) return false;
+  return Date.now() - new Date(session.created_at).getTime() < GENERATING_THRESHOLD_MS;
+}
+
+function SessionMeta({ item }: { item: HistorySessionItem }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="truncate text-sm text-ink-secondary">{item.original_prompt}</p>
+      <p className="font-mono text-xs text-ink-faint">{new Date(item.created_at).toLocaleString()}</p>
+    </div>
+  );
+}
 
 function thumbnailPath(session: HistorySessionItem): string | null {
   // If multiple previews have been finalized to 4K, use the most recently finalized one as the thumbnail.
@@ -193,6 +212,30 @@ export function HistoryGallery() {
               const thumbnail = thumbnailPath(item);
               const isRegenerating = regeneratingSessionId === item.session_id;
 
+              if (!thumbnail && isLikelyGenerating(item)) {
+                // The sessions row commits before previews exist, so zero previews on
+                // a recent session means it's still generating, not failed.
+                return (
+                  <div key={item.session_id} className="flex flex-col gap-2 text-left">
+                    <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-lg bg-app-surface text-ink-muted">
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="animate-spin text-accent"
+                      >
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                      </svg>
+                      <span className="text-xs">Generating…</span>
+                    </div>
+                    <SessionMeta item={item} />
+                  </div>
+                );
+              }
+
               if (!thumbnail) {
                 // Session where every preview failed: there's no image to show in the
                 // modal, so the card isn't clickable — show a regenerate button instead.
@@ -211,12 +254,7 @@ export function HistoryGallery() {
                         {isRegenerating ? "Regenerating…" : "Regenerate"}
                       </button>
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <p className="truncate text-sm text-ink-secondary">{item.original_prompt}</p>
-                      <p className="font-mono text-xs text-ink-faint">
-                        {new Date(item.created_at).toLocaleString()}
-                      </p>
-                    </div>
+                    <SessionMeta item={item} />
                   </div>
                 );
               }
@@ -236,12 +274,7 @@ export function HistoryGallery() {
                       className="h-full w-full object-cover transition hover:opacity-80"
                     />
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <p className="truncate text-sm text-ink-secondary">{item.original_prompt}</p>
-                    <p className="font-mono text-xs text-ink-faint">
-                      {new Date(item.created_at).toLocaleString()}
-                    </p>
-                  </div>
+                  <SessionMeta item={item} />
                 </button>
               );
             })}

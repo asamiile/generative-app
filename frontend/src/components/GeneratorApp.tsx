@@ -56,7 +56,7 @@ export function GeneratorApp() {
   return (
     <div className="mx-auto flex max-w-[760px] flex-col gap-11 px-6 py-12">
       <h1 className="text-[32px] font-semibold leading-[1.1] tracking-[-0.025em] text-ink-primary">
-        Photorealistic Image Generator
+        Image Generator
       </h1>
 
       <section className="flex flex-col gap-5">
