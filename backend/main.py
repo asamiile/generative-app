@@ -1,6 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -72,9 +73,14 @@ async def generate_preview(
 ) -> GeneratePreviewResponse:
     enhanced_prompt = await services.expand_prompt(body.prompt)
 
+    # Commit here to release the write lock before the slow Gemini call. Flushing
+    # without committing across a long external API call would hold SQLite's write
+    # lock the whole time, making other requests fail immediately with
+    # "database is locked".
     session = GenerationSession(original_prompt=body.prompt, enhanced_prompt=enhanced_prompt)
     db.add(session)
-    db.flush()
+    db.commit()
+    db.refresh(session)
 
     image_paths = await services.generate_preview_batch(enhanced_prompt)
 
@@ -130,20 +136,24 @@ async def generate_finalize(
 
     image_path = await services.generate_final_image(session.enhanced_prompt, preview.image_path)
 
-    session.selected_preview_id = preview.id
-    session.final_image_path = image_path
-    session.final_status = GenerationStatus.SUCCESS if image_path else GenerationStatus.FAILED
-    session.error_message = None if image_path else "Failed to generate the final 4K image"
-    session.finalized_at = datetime.now(timezone.utc)
+    # The 4K result is kept per-preview so multiple previews in the same session can
+    # each be finalized independently — a session-level field could only hold one,
+    # and a later finalize would overwrite an earlier one.
+    preview.final_image_path = image_path
+    preview.final_status = GenerationStatus.SUCCESS if image_path else GenerationStatus.FAILED
+    preview.final_error_message = None if image_path else "Failed to generate the final 4K image"
+    preview.resolution = "4K"
+    preview.finalized_at = datetime.now(timezone.utc)
 
     db.commit()
-    db.refresh(session)
+    db.refresh(preview)
 
     return FinalizeResponse(
         session_id=session.id,
-        image_path=session.final_image_path,
-        status=session.final_status,
-        created_at=session.finalized_at,
+        preview_id=preview.id,
+        image_path=preview.final_image_path,
+        status=preview.final_status,
+        created_at=preview.finalized_at,
     )
 
 
@@ -155,15 +165,20 @@ async def generate_finalize(
 def get_history(
     limit: int = 20,
     offset: int = 0,
+    sort: Literal["newest", "oldest"] = "newest",
     db: DBSession = Depends(get_db),
 ) -> list[HistorySessionItem]:
-    # 4K化済み・未4K化を問わず、セッション単位でプレビュー4枚をまとめて返す
-    # (History画面でグループ表示するため)。
-    # created_atはSQLiteのCURRENT_TIMESTAMP(秒精度)のため、同一秒に複数作成されると
-    # 順序が不定になる。idを副次キーにして常に新しい順を保証する。
+    # Group all 4 previews under their session regardless of finalize state, since
+    # the History screen renders them grouped.
+    # created_at is SQLite's CURRENT_TIMESTAMP (second precision), so rows created in
+    # the same second sort non-deterministically; id as a tiebreaker keeps it stable.
+    if sort == "oldest":
+        order_by = (GenerationSession.created_at.asc(), GenerationSession.id.asc())
+    else:
+        order_by = (GenerationSession.created_at.desc(), GenerationSession.id.desc())
     session_stmt = (
         select(GenerationSession)
-        .order_by(GenerationSession.created_at.desc(), GenerationSession.id.desc())
+        .order_by(*order_by)
         .limit(limit)
         .offset(offset)
     )
@@ -185,15 +200,15 @@ def get_history(
             original_prompt=s.original_prompt,
             enhanced_prompt=s.enhanced_prompt,
             created_at=s.created_at,
-            final_image_path=s.final_image_path,
-            final_status=s.final_status,
-            selected_preview_id=s.selected_preview_id,
             previews=[
                 PreviewImageOut(
                     preview_id=p.id,
                     candidate_index=p.candidate_index,
                     image_path=p.image_path,
                     status=p.status,
+                    final_image_path=p.final_image_path,
+                    final_status=p.final_status,
+                    finalized_at=p.finalized_at,
                 )
                 for p in previews_by_session[s.id]
             ],

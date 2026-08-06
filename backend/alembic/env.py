@@ -12,8 +12,8 @@ from models import Base  # noqa: E402
 config = context.config
 
 if config.config_file_name is not None:
-    # disable_existing_loggers=Trueがデフォルトだと、uvicornのアクセス/エラーログまで
-    # 無効化されてしまう(このiniに列挙されていないロガーは全て黙らされるため)。
+    # The default disable_existing_loggers=True would silence uvicorn's access/error
+    # loggers too, since any logger not listed in this ini gets muted.
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 database_url = os.environ.get("DATABASE_URL")

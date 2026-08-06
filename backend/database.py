@@ -11,15 +11,19 @@ from models import Base
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./history.db")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# timeout: don't fail immediately if another request currently holds the write lock —
+# wait up to 5 seconds for it to release before retrying (SQLite's busy_timeout).
+engine = create_engine(
+    DATABASE_URL, connect_args={"check_same_thread": False, "timeout": 5}
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_db() -> None:
-    """起動時にAlembicマイグレーションを適用する。
+    """Apply Alembic migrations on startup.
 
-    alembic_versionテーブルがない新規DBはcreate_all + stampでブートストラップし、
-    既存DBはupgrade headで差分だけ適用する(spira-baseと同じパターン)。
+    A fresh DB (no alembic_version table) is bootstrapped with create_all + stamp;
+    an existing DB just gets upgrade head applied (same pattern as spira-base).
     """
     alembic_cfg = Config(str(Path(__file__).parent / "alembic.ini"))
 

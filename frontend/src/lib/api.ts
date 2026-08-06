@@ -7,6 +7,10 @@ export type PreviewImage = {
   candidate_index: number;
   image_path: string | null;
   status: GenerationStatus;
+  // The result of finalizing this preview to 4K. Each preview holds its own independently.
+  final_image_path: string | null;
+  final_status: GenerationStatus | null;
+  finalized_at: string | null;
 };
 
 export type GeneratePreviewResponse = {
@@ -17,6 +21,7 @@ export type GeneratePreviewResponse = {
 
 export type FinalizeResponse = {
   session_id: number;
+  preview_id: number;
   image_path: string | null;
   status: GenerationStatus;
   created_at: string;
@@ -27,9 +32,6 @@ export type HistorySessionItem = {
   original_prompt: string;
   enhanced_prompt: string;
   created_at: string;
-  final_image_path: string | null;
-  final_status: GenerationStatus | null;
-  selected_preview_id: number | null;
   previews: PreviewImage[];
 };
 
@@ -59,8 +61,16 @@ export function generateFinalize(sessionId: number, previewId: number): Promise<
   });
 }
 
-export function getHistory(limit = 20, offset = 0): Promise<HistorySessionItem[]> {
-  return apiFetch<HistorySessionItem[]>(`/api/history?limit=${limit}&offset=${offset}`);
+export type HistorySort = "newest" | "oldest";
+
+export function getHistory(
+  limit = 20,
+  offset = 0,
+  sort: HistorySort = "newest",
+): Promise<HistorySessionItem[]> {
+  return apiFetch<HistorySessionItem[]>(
+    `/api/history?limit=${limit}&offset=${offset}&sort=${sort}`,
+  );
 }
 
 export function resolveImageUrl(imagePath: string): string {

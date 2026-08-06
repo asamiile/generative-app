@@ -14,6 +14,10 @@ class PreviewImageOut(BaseModel):
     candidate_index: int
     image_path: str | None
     status: GenerationStatus
+    # The result of finalizing this preview to 4K. Each preview holds its own independently.
+    final_image_path: str | None = None
+    final_status: GenerationStatus | None = None
+    finalized_at: datetime | None = None
 
 
 class GeneratePreviewResponse(BaseModel):
@@ -29,6 +33,7 @@ class FinalizeRequest(BaseModel):
 
 class FinalizeResponse(BaseModel):
     session_id: int
+    preview_id: int
     image_path: str | None
     status: GenerationStatus
     created_at: datetime
@@ -39,7 +44,4 @@ class HistorySessionItem(BaseModel):
     original_prompt: str
     enhanced_prompt: str
     created_at: datetime
-    final_image_path: str | None
-    final_status: GenerationStatus | None
-    selected_preview_id: int | None
     previews: list[PreviewImageOut]

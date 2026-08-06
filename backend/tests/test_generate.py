@@ -51,8 +51,41 @@ def test_generate_finalize_success(client, auth_headers, monkeypatch):
 
     assert res.status_code == 200
     body = res.json()
+    assert body["preview_id"] == preview_id
     assert body["status"] == "success"
     assert body["image_path"] == "/static/images/final.jpg"
+
+
+def test_generate_finalize_multiple_previews_independently(client, auth_headers, monkeypatch):
+    """Finalizing two different previews in one session doesn't overwrite each other."""
+    preview_body = create_preview_session(client, auth_headers, monkeypatch)
+    session_id = preview_body["session_id"]
+    preview_id_a = preview_body["previews"][0]["preview_id"]
+    preview_id_b = preview_body["previews"][2]["preview_id"]
+
+    monkeypatch.setattr(
+        services, "generate_final_image", AsyncMock(return_value="/static/images/final-a.jpg")
+    )
+    client.post(
+        "/api/generate/finalize",
+        json={"session_id": session_id, "preview_id": preview_id_a},
+        headers=auth_headers,
+    )
+
+    monkeypatch.setattr(
+        services, "generate_final_image", AsyncMock(return_value="/static/images/final-b.jpg")
+    )
+    client.post(
+        "/api/generate/finalize",
+        json={"session_id": session_id, "preview_id": preview_id_b},
+        headers=auth_headers,
+    )
+
+    history = client.get("/api/history", headers=auth_headers).json()
+    previews_by_id = {p["preview_id"]: p for p in history[0]["previews"]}
+
+    assert previews_by_id[preview_id_a]["final_image_path"] == "/static/images/final-a.jpg"
+    assert previews_by_id[preview_id_b]["final_image_path"] == "/static/images/final-b.jpg"
 
 
 def test_generate_finalize_rejects_preview_from_other_session(client, auth_headers, monkeypatch):

@@ -16,10 +16,10 @@ STATIC_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 TEXT_MODEL = "gemini-3.6-flash"
 IMAGE_MODEL = "gemini-3-pro-image"
 PREVIEW_COUNT = 4
-# gemini-3-pro-imageは需要が高く503 UNAVAILABLEを返すことがあるため、短い間隔でリトライする。
+# gemini-3-pro-image is high demand and can return 503 UNAVAILABLE, so retry with short backoff.
 IMAGE_RETRY_DELAYS_SECONDS = (2, 5, 10)
 
-# 実写限定の絶対ルール。詳細はdocs/DESIGN.md 6章を参照。
+# Absolute photorealistic-only rule. See .agents/docs/api.md for details.
 SYSTEM_PROMPT = """You are a prompt writer for a photorealistic image generation model.
 Rules:
 - Output ONLY the English prompt for the image generation model. No explanations, no quotes, no markdown.
@@ -42,18 +42,18 @@ async def expand_prompt(user_prompt: str) -> str:
     client = _get_client()
     response = await client.aio.models.generate_content(
         model=TEXT_MODEL,
-        # ユーザー入力は指示ではなくデータとして扱う(プロンプトインジェクション対策)。
-        contents=f'ユーザー入力: """{user_prompt}"""',
+        # Treat user input as data, not instructions (prompt injection defense).
+        contents=f'User input: """{user_prompt}"""',
         config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
     )
     return response.text.strip()
 
 
 def _extract_image_part(response: types.GenerateContentResponse) -> tuple[bytes, str] | None:
-    """レスポンスから画像バイト列と実際のMIMEタイプを取り出す。
+    """Extract the image bytes and actual MIME type from the response.
 
-    Gemini画像モデルはPNG指定していてもJPEGを返すことがあるため、
-    拡張子は固定せずレスポンスのmime_typeに従って決める。
+    Gemini's image models can return JPEG even when PNG was requested, so the file
+    extension is decided from the response's mime_type rather than fixed.
     """
     for candidate in response.candidates or []:
         for part in candidate.content.parts or []:
@@ -93,17 +93,18 @@ async def _generate_one_preview(enhanced_prompt: str) -> str | None:
             ),
         )
     except errors.APIError:
-        # 1枚の失敗で残り3枚のプレビューまで失わせない(呼び出し元でstatus: failedとして記録)。
+        # Don't let one failed preview take down the other 3 (caller records status: failed).
         return None
     extracted = _extract_image_part(response)
     return _save_image(*extracted) if extracted else None
 
 
 async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
-    """プレビュー4枚を並列生成する。
+    """Generate the 4 previews in parallel.
 
-    Gemini APIの画像生成モデルはcandidateCount(複数候補の一括返却)に
-    対応していないため、個別リクエストをasyncio.gatherで並列実行する。
+    Gemini's image generation models don't support candidateCount (returning
+    multiple candidates in one call), so individual requests are fanned out with
+    asyncio.gather instead.
     """
     tasks = [_generate_one_preview(enhanced_prompt) for _ in range(PREVIEW_COUNT)]
     return await asyncio.gather(*tasks)
@@ -117,7 +118,8 @@ async def generate_final_image(enhanced_prompt: str, reference_image_path: str) 
     try:
         response = await _generate_content_with_retry(
             model=IMAGE_MODEL,
-            # 選択したプレビューを参照画像として渡し、構図を保持したまま4K化する。
+            # Pass the selected preview as a reference image to upscale to 4K while
+            # preserving its composition.
             contents=[reference_part, enhanced_prompt],
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
@@ -125,7 +127,7 @@ async def generate_final_image(enhanced_prompt: str, reference_image_path: str) 
             ),
         )
     except errors.APIError:
-        # 呼び出し元(main.py)がNoneをfinal_status: failedとして記録する。
+        # The caller (main.py) records None as final_status: failed.
         return None
     extracted = _extract_image_part(response)
     return _save_image(*extracted) if extracted else None
