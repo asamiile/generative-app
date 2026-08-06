@@ -22,28 +22,29 @@ def _status_enum() -> SAEnum:
 
 
 class GenerationSession(Base):
-    """1回のプロンプト入力 = 1セッション。プレビュー4枚と本番(4K)1枚を紐づける。"""
+    """One prompt submission = one session, linked to 4 previews.
+
+    The 4K result lives on preview_images, not here, so multiple previews within
+    one session can each be finalized to 4K independently.
+    """
 
     __tablename__ = "sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     original_prompt: Mapped[str] = mapped_column(String(200), nullable=False)
     enhanced_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    # preview_images.id への論理参照。SQLiteは循環FK(sessions<->preview_images)を
-    # ALTER TABLEで後付けできないため、DB制約は付けずアプリ側で整合性を保証する。
-    selected_preview_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    final_image_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    final_status: Mapped[GenerationStatus | None] = mapped_column(_status_enum(), nullable=True)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    resolution: Mapped[str] = mapped_column(String(16), nullable=False, default="4K", server_default="4K")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
-    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PreviewImage(Base):
-    """1セッションにつき4件生成される低解像度プレビュー。"""
+    """One of the 4 low-resolution previews generated per session.
+
+    The final_* columns hold the result of finalizing this preview (used as a
+    reference image) to 4K. NULL until finalized. Each preview tracks its own
+    finalize state independently.
+    """
 
     __tablename__ = "preview_images"
 
@@ -61,3 +62,9 @@ class PreviewImage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+    final_image_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    final_status: Mapped[GenerationStatus | None] = mapped_column(_status_enum(), nullable=True)
+    final_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

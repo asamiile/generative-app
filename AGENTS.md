@@ -1,67 +1,67 @@
 # AGENTS.md
 
-このリポジトリで作業するAIエージェント向けの指示書。詳細な設計は [.agents/docs/DESIGN.md](.agents/docs/DESIGN.md) を参照。
+Instructions for AI agents working in this repository. See [.agents/docs/overview.md](.agents/docs/overview.md) for the full spec.
 
-## プロジェクト概要
+## Project overview
 
-Gemini APIを使い、短いテキスト入力から実写表現限定の画像を生成するローカルWebアプリ（MVP）。将来的に画像以外の生成（テキスト/動画等）にも拡張予定のため、リポジトリ名は`generative-app`。
+A local web app that uses the Gemini API to generate photorealistic-only images from short text prompts (MVP). The repo is named `generative-app` because it may expand beyond images (text/video, etc.) later.
 
-- バックエンド: `backend/`（FastAPI, Python, SQLAlchemy, SQLite, Alembic）
-- フロントエンド: `frontend/`（Next.js App Router, TypeScript, Tailwind CSS）
-- 実行環境: Docker / docker-compose（MVP環境構築の段階から導入。当面はクラウドにデプロイせずローカル実行のみ）
+- Backend: `backend/` (FastAPI, Python, SQLAlchemy, SQLite, Alembic)
+- Frontend: `frontend/` (Next.js App Router, TypeScript, Tailwind CSS)
+- Runtime: Docker / docker-compose (local only for now, no cloud deployment)
 
-## セットアップ・実行コマンド
+## Setup and run commands
 
-まだscaffolding前のため未確定。`backend/`・`frontend/`・`docker-compose.yml`を作成した時点で、以下を実際のコマンドに更新すること。
+```bash
+# Run locally via docker-compose
+docker compose up --build
 
-```
-# ローカル実行はdocker-compose経由が基本(予定)
-docker-compose up
-
-# 個別のデバッグ時のみ(予定)
+# Debugging a single service only
 cd backend && pip install -r requirements.txt && uvicorn main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
-## 絶対に守るべき制約
+See [README.md](README.md) for the full setup flow (Gemini API key, spend cap, env files) and development commands.
 
-1. **画像生成モデルはNano Banana系を使う。Imagen系（`imagen-3`, `imagen-4`等）は使用禁止。**
-   Imagen系は2026年8月17日にシャットダウン済み/予定。`gemini-3-pro-image`（Nano Banana Pro）を使用する。
-2. **モデルID・APIパラメーターは実装直前に必ず最新の公式ドキュメントで確認する。**
-   参考: https://ai.google.dev/gemini-api/docs/models 、 https://ai.google.dev/gemini-api/docs/image-generation
-   Googleの画像生成モデルは数ヶ月単位で名称・非推奨化が進むため、コード内のモデル名を鵜呑みにしない。
-3. **プロンプト拡張のシステムプロンプトには必ず以下を含める**（`.agents/docs/DESIGN.md` 6章参照）:
-   - 出力は画像生成用の英語プロンプトのみ
-   - 実写表現（Photorealistic, live-action style）を必須指定
-   - アニメ調・イラスト調は除外
-   - レンズ・被写界深度・ライティング等で実写の質感を強化
-4. **APIキーは`.env`（`backend/.env`）にのみ保存し、コミットしない。** `.gitignore`に必ず含める。
-5. **画像生成は「4枚プレビュー（1K）→選択→本番（4K）」の2段階フローとする。** 単発で4K画像だけを生成する実装にはしない。プレビュー4枚は`candidateCount`非対応のため個別に4回呼び出す。本番生成は選択したプレビューを参照画像として渡し、構図を保持したまま4K化する。いずれもレイテンシが長いため、バックエンド/フロントともタイムアウトを十分に確保する。
-6. **全APIエンドポイント（`/api/generate/preview`・`/api/generate/finalize`・`/api/history`）に共有トークン認証を必須とする。** `Authorization: Bearer <APP_API_TOKEN>`を検証する`backend/auth.py`の依存関数を必ず経由させる。認証なしでの実装・デプロイは行わない（実務利用時に誰でも課金APIを呼べてしまうため）。
-7. **画像生成系エンドポイントには`slowapi`でレート制限をかける。** デフォルト1時間あたり10リクエスト（`RATE_LIMIT_PER_HOUR`で調整）。
-8. **各コンテナーは非rootユーザーで実行し、ポートは`127.0.0.1`にのみバインドする。** ローカル実行時に意図せず外部公開しない。
-9. **DBスキーマ変更は必ずAlembicのマイグレーションファイルを作成する。** `Base.metadata.create_all()`だけで済ませない。外部キーには`ondelete`ポリシーと`index=True`を明記し、`status`系カラムは自由文字列ではなくEnumで値を制約する（`.agents/docs/DESIGN.md` 4章参照）。
+## Constraints that must never be broken
 
-## コミットメッセージ規約
+1. **Only use Nano Banana-family image models. Imagen models (`imagen-3`, `imagen-4`, etc.) are forbidden.**
+   Imagen was shut down on 2026-08-17. Use `gemini-3-pro-image` (Nano Banana Pro).
+2. **Always confirm the model ID and API parameters against the latest official docs right before implementing.**
+   References: https://ai.google.dev/gemini-api/docs/models , https://ai.google.dev/gemini-api/docs/image-generation
+   Google's image generation models are renamed/deprecated on a timescale of months — never trust a model name already in the code.
+3. **The prompt-expansion system prompt must always include** (see [.agents/docs/api.md](.agents/docs/api.md)):
+   - Output only an English prompt for the image generation model
+   - Photorealistic / live-action style is mandatory
+   - Anime/illustration styles are excluded
+   - Reinforce the photographic look via lens, depth of field, lighting, etc.
+4. **Store the API key only in `.env` (`backend/.env`), never commit it.** Always keep it in `.gitignore`.
+5. **Image generation is a two-step flow: 4 previews (1K) → select → final (4K).** Never implement a single-shot 4K-only generation. The 4 previews require 4 separate calls since `candidateCount` isn't supported for image models. The final generation passes the selected preview as a reference image to keep the composition while upscaling to 4K. Both steps have long latency, so set generous timeouts on both backend and frontend.
+6. **Every API endpoint (`/api/generate/preview`, `/api/generate/finalize`, `/api/history`) requires shared-token auth.** Always route through `backend/auth.py`'s dependency, which validates `Authorization: Bearer <APP_API_TOKEN>`. Never implement or deploy an endpoint without it (this app calls paid APIs, so an unauthenticated endpoint is callable by anyone).
+7. **Rate-limit the image generation endpoints with `slowapi`.** Default is 10 requests/hour, tunable via `RATE_LIMIT_PER_HOUR`.
+8. **Every container runs as a non-root user, and ports bind only to `127.0.0.1`.** Don't expose anything externally by accident during local runs.
+9. **Every DB schema change needs an Alembic migration file.** Never rely on `Base.metadata.create_all()` alone. Foreign keys must specify an `ondelete` policy and `index=True`; `status`-like columns must be an Enum, not a free-form string (see [.agents/docs/database.md](.agents/docs/database.md)).
 
-リリースは[Release Please](https://github.com/googleapis/release-please)で自動化されている（`.github/workflows/release.yml`）。バージョンはコミットメッセージの**Conventional Commits**prefixから自動的に決まるため、prefixを必ずつけること。
+## Commit message convention
 
-| prefix | 用途 | バージョン変化 |
+Releases are automated with [Release Please](https://github.com/googleapis/release-please) (`.github/workflows/release.yml`). The version bump is derived from the **Conventional Commits** prefix in each commit message, so always include one.
+
+| prefix | purpose | version bump |
 |--------|------|---------------|
-| `feat:` | 新機能 | minor |
-| `fix:` | バグ修正 | patch |
-| `feat!:` / `fix!:` | 破壊的変更 | major |
-| `chore:` / `docs:` / `refactor:` / `test:` | その他 | 変化なし |
+| `feat:` | new feature | minor |
+| `fix:` | bug fix | patch |
+| `feat!:` / `fix!:` | breaking change | major |
+| `chore:` / `docs:` / `refactor:` / `test:` | other | none |
 
-- Release PRは`main`にマージする（`main`以外へのマージではタグ・GitHub Releaseは作られない）。
-- 1コミットに複数の変更を詰め込みすぎない。prefixで表せる単位に分ける。
+- Release PRs merge into `main` (merging elsewhere does not create a tag or GitHub Release).
+- Don't cram multiple changes into one commit — split by what a single prefix can describe.
 
-## コード規約
+## Code conventions
 
-- コメントは「なぜ」を説明する場合のみ最小限に。「何をしているか」の説明コメントは書かない。
-- タスクの要求範囲を超えた抽象化・将来対応のための拡張は行わない（YAGNI）。
-- 既存ファイルの編集を優先し、新規ファイル作成は必要な場合のみ。
+- Comments only to explain "why", kept minimal. Never write comments that explain "what" the code does.
+- Don't add abstractions or future-proofing beyond what the task requires (YAGNI).
+- Prefer editing existing files; create new files only when necessary.
 
-## ディレクトリ構成
+## Directory structure
 
-`.agents/docs/DESIGN.md` 3章の構成に従う。変更する場合は設計書側も更新すること。DB設計・APIエンドポイント設計は同ドキュメント4章・5章を参照。
+Follows the structure in [.agents/docs/overview.md](.agents/docs/overview.md). If it changes, update that doc too. See [.agents/docs/database.md](.agents/docs/database.md) and [.agents/docs/api.md](.agents/docs/api.md) for DB schema and API endpoint design.

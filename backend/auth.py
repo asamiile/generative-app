@@ -11,9 +11,10 @@ def verify_token(authorization: str | None = Header(None)) -> None:
             detail="APP_API_TOKEN is not configured on the server",
         )
 
-    # authorizationをHeader(...)(必須)にすると、ヘッダー自体が無いリクエストは
-    # このコードに届く前にFastAPIが422を返してしまい、他の失敗と一貫しない。
-    # Header(None)にして、無い場合もここで401として扱う。
+    # Header(...) (required) would make FastAPI return 422 for a request with no
+    # Authorization header at all, before this code ever runs — inconsistent with
+    # every other failure mode here. Header(None) lets a missing header fall through
+    # to the same 401 path as an invalid one.
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or token != expected:
         raise HTTPException(

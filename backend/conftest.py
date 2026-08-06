@@ -3,13 +3,14 @@ import tempfile
 from collections.abc import Iterator
 from unittest.mock import AsyncMock
 
-# main/database importより前に、テスト用の環境変数とDBを用意する。
+# Set up test env vars and DB before main/database get imported.
 _TEST_DB_FD, _TEST_DB_PATH = tempfile.mkstemp(suffix=".db")
 os.close(_TEST_DB_FD)
 
-# setdefaultではなく直接代入する: このプロセスがdocker-compose経由で起動している場合、
-# backend/.envの本物の値(APP_API_TOKEN・RATE_LIMIT_PER_HOUR=10など)が既にos.environに
-# 入っており、setdefaultだと上書きされずテストがレート制限に引っかかる。
+# Direct assignment, not setdefault: when this process is launched via docker-compose,
+# the real values from backend/.env (APP_API_TOKEN, RATE_LIMIT_PER_HOUR=10, etc.) are
+# already in os.environ, and setdefault wouldn't override them — tests would then hit
+# the real rate limit.
 os.environ["APP_API_TOKEN"] = "test-token"
 os.environ["GEMINI_API_KEY"] = "test-key"
 os.environ["RATE_LIMIT_PER_HOUR"] = "1000"
@@ -35,7 +36,7 @@ DEFAULT_PREVIEW_PATHS = [
 
 @pytest.fixture()
 def client() -> Iterator[TestClient]:
-    """テストごとに独立した一時SQLite DBを使うFastAPI TestClient。"""
+    """FastAPI TestClient backed by a fresh, isolated temp SQLite DB per test."""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
@@ -71,7 +72,7 @@ def create_preview_session(
     prompt: str = "a cat",
     preview_paths: list[str | None] | None = None,
 ) -> dict:
-    """services.pyのGemini呼び出しをモックして/api/generate/previewを叩く。"""
+    """Call /api/generate/preview with services.py's Gemini calls mocked out."""
     monkeypatch.setattr(services, "expand_prompt", AsyncMock(return_value=f"enhanced: {prompt}"))
     monkeypatch.setattr(
         services,
