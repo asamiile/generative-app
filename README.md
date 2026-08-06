@@ -2,6 +2,12 @@
 
 A local web app that generates photorealistic images from short text prompts using the Gemini API.
 
+[![Image from Gyazo](https://i.gyazo.com/4da86262aa6b1a39ef6aa1fd5172e2e7.jpg)](https://gyazo.com/4da86262aa6b1a39ef6aa1fd5172e2e7)
+
+[![Image from Gyazo](https://i.gyazo.com/dcebe41ad28bd1e27c20446ff81be784.jpg)](https://gyazo.com/dcebe41ad28bd1e27c20446ff81be784)
+
+[![Image from Gyazo](https://i.gyazo.com/dda2997f417be76c7c772dcec1680de9.jpg)](https://gyazo.com/dda2997f417be76c7c772dcec1680de9)
+
 - Runs entirely locally via Docker / docker-compose — no cloud deployment required
 - Two-step generation flow: 4 low-resolution previews → pick one → finish it in 4K
 - Generated images and history persist across restarts (Docker volumes + SQLite)
