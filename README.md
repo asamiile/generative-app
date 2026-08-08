@@ -4,9 +4,9 @@ A local web app that generates photorealistic images from short text prompts, wi
 
 [![Image from Gyazo](https://i.gyazo.com/4da86262aa6b1a39ef6aa1fd5172e2e7.jpg)](https://gyazo.com/4da86262aa6b1a39ef6aa1fd5172e2e7)
 
-[![Image from Gyazo](https://i.gyazo.com/dcebe41ad28bd1e27c20446ff81be784.jpg)](https://gyazo.com/dcebe41ad28bd1e27c20446ff81be784)
+[![Image from Gyazo](https://i.gyazo.com/25d5535acfbc109245f1a9165bb43d24.jpg)](https://gyazo.com/25d5535acfbc109245f1a9165bb43d24)
 
-[![Image from Gyazo](https://i.gyazo.com/dda2997f417be76c7c772dcec1680de9.jpg)](https://gyazo.com/dda2997f417be76c7c772dcec1680de9)
+[![Image from Gyazo](https://i.gyazo.com/2501efdbb7f810062d7d5c26335d2c5b.jpg)](https://gyazo.com/2501efdbb7f810062d7d5c26335d2c5b)
 
 - Runs entirely locally via Docker / docker-compose — no cloud deployment required
 - Two-step generation flow: 4 low-resolution previews → pick one → finish it in high resolution
@@ -16,47 +16,40 @@ A local web app that generates photorealistic images from short text prompts, wi
 
 ## Available models
 
-| Provider | Preview generation | Finalize (4K) | Cost | Setup |
-|---|---|---|---|---|
-| **Local** (Ollama + ComfyUI) | ComfyUI (SDXL checkpoint) | ComfyUI (img2img) | Free, but slow — needs real PC-spec headroom | [Local provider setup](#local-provider-setup-ollama--comfyui-optional) |
-| **Gemini** (default) | `gemini-3-pro-image` | `gemini-3-pro-image` | ~$0.40/full cycle (4 previews + 1 final) | [Gemini API setup](#gemini-api-setup) |
-| **OpenAI** | `gpt-image-2` | `gpt-image-2` | ~$0.02-0.06/image depending on quality tier | [OpenAI API setup](#openai-api-setup) |
-| **Stability AI** | Stable Image Core | Stable Image (SD3, image-to-image) | Core ~$0.03/image, SD3 varies | [Stability AI API setup](#stability-ai-api-setup) |
+| Provider | Preview generation | Finalize (4K) | Cost |
+|---|---|---|---|
+| **Local** (Ollama + ComfyUI) | ComfyUI (SDXL checkpoint) | ComfyUI (img2img) | Free, but slow — needs real PC-spec headroom |
+| **Gemini** (default) | `gemini-3-pro-image` | `gemini-3-pro-image` | ~$0.40/full cycle (4 previews + 1 final) |
+| **OpenAI** | `gpt-image-2` | `gpt-image-2` | ~$0.02-0.06/image depending on quality tier |
+| **Stability AI** | Stable Image Core | Stable Image (SD3, image-to-image) | Core ~$0.03/image, SD3 varies |
 
-Preview generation and the finalize (4K) step use **independently selectable** providers per session/preview (a dropdown next to "Generate previews" and another next to "Generate 4K" / "Regenerate") — e.g. preview locally for free, then finalize with an API model when you need real 4K quickly. See [Local provider setup](#local-provider-setup-ollama--comfyui-optional) for why this matters.
+Preview generation and the finalize (4K) step use **independently selectable** providers — e.g. preview locally for free, then finalize with an API model when you need real 4K quickly (see [Local provider setup](#local-provider-setup-ollama--comfyui-optional) for why).
 
-Only Gemini is required to run the app at all; the other three are optional, each needing its own API key setup below.
+At least one provider needs to be configured — pick one from the table above and follow its setup section below. **Local** needs no API key (just Ollama + ComfyUI); the others each need one.
 
 ## Setup
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. Clone this repository.
-3. [Set up the Gemini API](#gemini-api-setup) (issue a key, set a spend cap, configure the env files).
-4. Run it locally:
+3. Pick a model from [Available models](#available-models) and follow its setup section below (issue an API key, or — for **Local** — see [Local provider setup](#local-provider-setup-ollama--comfyui-optional)).
+4. Copy the env file templates and configure the shared settings:
+   - `backend/.env.example` → `backend/.env`: set `APP_API_TOKEN` (a long random string) and `DEFAULT_IMAGE_PROVIDER` to match the model you picked, plus whichever provider's API key from step 3.
+   - `frontend/.env.local.example` → `frontend/.env.local`: set `APP_API_TOKEN` to the same value as `backend/.env`.
+   - Adjust `RATE_LIMIT_PER_HOUR` if needed.
+
+   Templates: [backend/.env.example](backend/.env.example), [frontend/.env.local.example](frontend/.env.local.example)
+5. Run it locally:
    ```bash
    docker compose up --build
    ```
-5. Open [http://localhost:3000](http://localhost:3000) and generate an image.
+6. Open [http://localhost:3000](http://localhost:3000), pick your model in the app, and generate an image.
 
 ### Gemini API setup
 
 1. Issue an API key at [Google AI Studio](https://aistudio.google.com/apikey).
    - Image generation (`gemini-3-pro-image`) requires Cloud Billing; the free tier doesn't cover it.
-2. In AI Studio's **Spend** tab, set a monthly dollar cap for the project — `/api/generate/preview` and `/api/generate/finalize` call paid models, so this is strongly recommended.
-   - Enforcement has a ~10 minute delay, so a request burst right at the cap may still incur a small extra charge. A [Cloud Billing budget alert](https://cloud.google.com/billing/docs/how-to/budgets) is a useful addition (email only, doesn't block requests) but not a substitute.
+2. In AI Studio's **Spend** tab, set a monthly dollar cap — `/api/generate/preview` and `/api/generate/finalize` call paid models. Enforcement lags ~10 minutes, so also consider a [Cloud Billing budget alert](https://cloud.google.com/billing/docs/how-to/budgets) as backup.
 3. Set `GEMINI_API_KEY` in `backend/.env`.
-4. Set a shared secret in `APP_API_TOKEN` (must match between `backend/.env` and `frontend/.env.local`), and adjust `RATE_LIMIT_PER_HOUR` if needed.
-
-Templates: [backend/.env.example](backend/.env.example), [frontend/.env.local.example](frontend/.env.local.example)
-
-- Test command
-
-```bash
-curl -s -X POST http://localhost:8000/api/generate/preview \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <APP_API_TOKEN>" \
-  -d '{"prompt": "a quiet hot spring inn surrounded by mountains"}'
-```
 
 ### OpenAI API setup
 
@@ -65,22 +58,20 @@ curl -s -X POST http://localhost:8000/api/generate/preview \
 3. Model names change fast — verify `OPENAI_TEXT_MODEL` against [platform.openai.com/docs/models](https://platform.openai.com/docs/models) and `OPENAI_IMAGE_MODEL` against [the image generation guide](https://platform.openai.com/docs/guides/image-generation) before relying on the defaults in `backend/.env.example`.
 4. Restart the backend so it picks up the key: `docker compose up -d backend` (`restart` alone does **not** reload `.env`).
 
-Unlike Gemini/Local (4 separate calls), the Images API's `n` parameter generates all 4 previews in a single request. Finalize uses the edits endpoint (`/v1/images/edits`) with the selected preview as a reference image.
-
 ### Stability AI API setup
 
 1. Issue an API key at [platform.stability.ai/account/keys](https://platform.stability.ai/account/keys).
 2. Set `STABILITY_API_KEY` in `backend/.env`.
-3. Stability has no general-purpose text/chat API, so prompt expansion is delegated to another provider — set via `STABILITY_TEXT_PROVIDER` (`gemini` | `local` | `openai`, default `local`/Ollama, so no extra cloud API key is needed by default — this does mean the [Local provider setup](#local-provider-setup-ollama--comfyui-optional) must be done first). Change it to `gemini` or `openai` if you'd rather use one of those for the expansion step instead.
+3. Stability has no general-purpose text/chat API, so prompt expansion is delegated to another provider — set via `STABILITY_TEXT_PROVIDER` (`gemini` | `local` | `openai`, default `local`/Ollama, so no extra cloud API key is needed by default). **The default requires [Local provider setup](#local-provider-setup-ollama--comfyui-optional) (Ollama) to be done first — without it, prompt expansion fails before an image is ever generated.** Set it to `gemini` or `openai` instead if you'd rather skip the Local setup and delegate expansion to one of those.
 4. Restart the backend: `docker compose up -d backend`.
 
-Previews use Stable Image Core (cheap, ~$0.03/image); finalize uses the SD3 endpoint's image-to-image mode (`STABILITY_FINAL_STRENGTH`, default 0.35, controls how much the reference composition is preserved). **Known limitation**: Stability's exact parameter names for this endpoint weren't confirmable against their docs at the time this was written — if finalize fails, check `backend/providers/stability.py`'s module docstring and [platform.stability.ai/docs/api-reference](https://platform.stability.ai/docs/api-reference) directly.
+**Known limitation**: finalize's exact request shape wasn't confirmable against Stability's docs at write time — if it fails, check `backend/providers/stability.py`'s module docstring.
 
 ### Local provider setup (Ollama + ComfyUI, optional)
 
 The Gemini provider works out of the box. The `local` provider (offline, no per-request cost) needs one-time setup after `docker compose up --build`:
 
-> **Recommended usage**: use **Local** for previews and iterating on prompts freely, including regenerating a failed preview. Treat **Generate 4K as an API-model (Gemini, or another cloud provider) operation** — local 4K needs real PC-spec headroom (see the table below) and, even then, is slow. If local 4K fails or is taking too long, switch the provider dropdown next to "Generate 4K" to an API model instead of waiting it out.
+> **Recommended usage**: use **Local** for previews and iterating on prompts freely, including regenerating a failed preview. Treat **Generate 4K as an API-model (Gemini, or another cloud provider) operation** — local 4K needs real PC-spec headroom (see below) and, even then, is slow. If local 4K fails or is taking too long, switch the provider dropdown next to "Generate 4K" to an API model instead of waiting it out.
 
 1. Pull an Ollama model (used for prompt expansion):
    ```bash
@@ -95,24 +86,15 @@ The Gemini provider works out of the box. The `local` provider (offline, no per-
 4. Restart the backend so it picks up the new checkpoint filename if you changed `COMFYUI_CHECKPOINT`: `docker compose up -d backend` (`restart` alone does **not** reload `.env`).
 5. In the app, switch the Gemini/Local toggle to **Local** before generating.
 
-No separate upscale model download is needed — finalize resizes the selected preview directly (`COMFYUI_FINAL_WIDTH`/`HEIGHT`, default 1280x720, 16:9) and refines it via img2img, rather than running a 4x AI upscale model (that reliably OOM-kills ComfyUI on CPU-only inference — see below). Preview (`COMFYUI_WIDTH`/`HEIGHT`) defaults to square, matching the source images previews are meant to look like; finalize intentionally targets 16:9 instead, center-cropping the square preview rather than stretching it.
+No separate upscale model download is needed — finalize resizes and refines the selected preview via img2img instead.
 
 **GPU**: `comfyui/Dockerfile` defaults to `--cpu` (works everywhere, but slow for SDXL). On Linux with an NVIDIA GPU and `nvidia-container-toolkit`, uncomment the GPU passthrough block and the `command:` override in `docker-compose.yml`.
 
-**Recommended environment**: Apple Silicon Mac, 32GB physical RAM, with at least ~20GB allocated to Docker Desktop (Settings → Resources → Memory) — Docker's default allocation (~15.6GB) isn't enough; ComfyUI gets OOM-killed just loading the checkpoint. Also close other unrelated Docker projects while generating (`docker stats` to check) — they compete for the same CPU/memory budget and measurably slow things down.
+**Recommended environment**: allocate at least ~20GB to Docker Desktop (Settings → Resources → Memory) — the ~15.6GB default isn't enough and ComfyUI gets OOM-killed loading the checkpoint.
 
-**PC spec guideline for local Generate 4K** (CPU-only, no GPU passthrough — a rough guideline, not a guarantee, since actual results depend on your exact CPU and what else is running):
+Local 4K needs **24GB+ Docker memory** to run reliably, and even then is slow (a CPU-inference ceiling, not a bug) — see [.agents/docs/overview.md](.agents/docs/overview.md) for measured benchmarks. If you don't have that headroom, use an API model for Generate 4K instead.
 
-| `COMFYUI_FINAL_WIDTH`/`HEIGHT` | Docker memory | Result | Time |
-|---|---|---|---|
-| 1280x720 (default, 16:9) | ~16GB (Docker default) | OOM-killed | — |
-| 1280x720 (default, 16:9) | 24GB+ | Works | ~7 min (same pixel count as the old 1024x1024 default) |
-| 2560x1440 (16:9) | 24GB+ | Works | ~1h 15min (same pixel count as 2048x2048) |
-| 3840x2160 ("true" 4K, 16:9) | 24GB+ | Not attempted | Extrapolated 7-8+ hours — impractical |
-
-Bottom line: local 4K needs **24GB+ Docker memory** just to run reliably, and even then is not fast — this is a CPU-inference ceiling, not a bug. If you don't have that headroom, or don't want to wait, use an API model for Generate 4K instead. This is exactly why finalize has its own provider selector, independent of what generated the previews — preview locally for free, then finalize with Gemini (or another cloud provider) when you actually need high resolution quickly.
-
-The default sampling params (`COMFYUI_STEPS=8`, `COMFYUI_CFG=1.5`, etc.) assume a turbo/lightning-distilled SDXL checkpoint; using a standard (non-distilled) checkpoint like Juggernaut XL at these settings finishes faster but produces visibly noisy, undertrained-looking output — for that checkpoint, raise `COMFYUI_STEPS` to ~25-30 and `COMFYUI_CFG` to ~5-7 (slower still) or switch to an actual turbo/lightning checkpoint (keeps these fast defaults, better quality).
+The default sampling params (`COMFYUI_STEPS=8`, `COMFYUI_CFG=1.5`) assume a turbo/lightning-distilled checkpoint; Juggernaut XL (recommended above) is a standard checkpoint, so raise `COMFYUI_STEPS` to ~25-30 and `COMFYUI_CFG` to ~5-7 for it (slower, but avoids noisy/undertrained-looking output) — or swap in an actual turbo/lightning checkpoint to keep the fast defaults.
 
 **Known limitation**: the ComfyUI workflows in `backend/comfyui_workflows/` may need further tuning (sampler, quality) as you try different checkpoints.
 
@@ -175,6 +157,17 @@ Tests cover auth and the `/api/generate/*` and `/api/history` endpoints, with al
 ```bash
 docker compose exec backend pip install -r requirements-dev.txt
 docker compose exec backend pytest
+```
+
+### Calling the API directly
+
+Useful for confirming `APP_API_TOKEN` and a provider's API key are wired up correctly without going through the frontend:
+
+```bash
+curl -s -X POST http://localhost:8000/api/generate/preview \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <APP_API_TOKEN>" \
+  -d '{"prompt": "a quiet hot spring inn surrounded by mountains"}'
 ```
 
 ## Release
