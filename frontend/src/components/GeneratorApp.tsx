@@ -11,7 +11,7 @@ import {
   type Provider,
 } from "@/lib/api";
 import { LONG_TIMEOUT_MS } from "@/lib/timeouts";
-import { ProgressIndicator } from "@/components/ProgressIndicator";
+import { ProgressBar, ProgressIndicator } from "@/components/ProgressIndicator";
 import { PROVIDER_LABEL, ProviderSelect, useAvailableProviders } from "@/components/ProviderSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -75,6 +75,7 @@ export function GeneratorApp() {
   const [preview, setPreview] = useState<GeneratePreviewResponse | null>(null);
   const [finalImagePath, setFinalImagePath] = useState<string | null>(null);
   const [finalProvider, setFinalProvider] = useState<Provider | null>(null);
+  const [finalizingPreviewId, setFinalizingPreviewId] = useState<number | null>(null);
 
   const isBusy = phase === "generating-preview" || phase === "finalizing";
   const availableProviders = useAvailableProviders();
@@ -170,6 +171,7 @@ export function GeneratorApp() {
     if (!preview) return;
     setError(null);
     setPhase("finalizing");
+    setFinalizingPreviewId(previewId);
     try {
       const result = await generateFinalize(preview.session_id, previewId, finalizeProvider);
       if (result.status !== "success" || !result.image_path) {
@@ -181,6 +183,8 @@ export function GeneratorApp() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate the 4K image");
       setPhase("preview-ready");
+    } finally {
+      setFinalizingPreviewId(null);
     }
   };
 
@@ -259,12 +263,14 @@ export function GeneratorApp() {
                     Generation failed
                   </div>
                 )}
+                {finalizingPreviewId === p.preview_id && (
+                  <div className="absolute inset-x-0 top-0">
+                    <ProgressBar className="h-1 rounded-none" />
+                  </div>
+                )}
               </button>
             ))}
           </div>
-          {phase === "finalizing" && (
-            <ProgressIndicator label="Finishing in 4K — this can take a minute" />
-          )}
         </section>
       )}
 

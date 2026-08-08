@@ -23,7 +23,10 @@ A local web app that generates photorealistic images from short text prompts, wi
 | **OpenAI** | `gpt-image-2` | `gpt-image-2` | ~$0.02-0.06/image depending on quality tier |
 | **Stability AI** | Stable Image Core | Stable Image (SD3, image-to-image) | Core ~$0.03/image, SD3 varies |
 
-Preview generation and the finalize (4K) step use **independently selectable** providers — e.g. preview locally for free, then finalize with an API model when you need real 4K quickly (see [Local provider setup](#local-provider-setup-ollama--comfyui-optional) for why).
+Preview generation and the finalize (4K) step use **independently selectable** providers, so you don't have to pick one for everything:
+- Speed matters most → an API provider (Gemini/OpenAI/Stability AI)
+- Want to keep API usage down → Local
+- Local 4K fails or is too slow → switch just that step to an API provider (see [Local provider setup](#local-provider-setup-ollama--comfyui-optional) for why)
 
 At least one provider needs to be configured — pick one from the table above and follow its setup section below. **Local** needs no API key (just Ollama + ComfyUI); the others each need one.
 
@@ -35,7 +38,7 @@ At least one provider needs to be configured — pick one from the table above a
 4. Copy the env file templates and configure the shared settings:
    - `backend/.env.example` → `backend/.env`: set `APP_API_TOKEN` (a long random string), plus whichever provider's API key from step 3.
    - `frontend/.env.local.example` → `frontend/.env.local`: set `APP_API_TOKEN` to the same value as `backend/.env`.
-   - Adjust `RATE_LIMIT_PER_HOUR` if needed.
+   - Set a value for `RATE_LIMIT_PER_HOUR` (default 10) — the requests/hour cap on `/api/generate/preview` and `/api/generate/finalize`, **each independently**. Testing/iterating on prompts can burn through 10/hour quickly (surfaces as `429 Rate limit exceeded`), so consider raising it.
 
    Templates: [backend/.env.example](backend/.env.example), [frontend/.env.local.example](frontend/.env.local.example)
 5. Run it locally:

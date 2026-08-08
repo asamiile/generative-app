@@ -8,7 +8,7 @@ import {
   type HistorySessionItem,
   type Provider,
 } from "@/lib/api";
-import { ProgressIndicator } from "@/components/ProgressIndicator";
+import { ProgressBar } from "@/components/ProgressIndicator";
 import { PROVIDER_LABEL, ProviderSelect } from "@/components/ProviderSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -23,7 +23,8 @@ type Props = {
 };
 
 export function HistorySessionModal({ session, onClose, onFinalized, availableProviders }: Props) {
-  const [finalizing, setFinalizing] = useState(false);
+  const [finalizingPreviewId, setFinalizingPreviewId] = useState<number | null>(null);
+  const finalizing = finalizingPreviewId !== null;
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   // Finalize provider is selectable per preview, independent of the session's
@@ -38,7 +39,7 @@ export function HistorySessionModal({ session, onClose, onFinalized, availablePr
 
   const handleSelectPreview = async (previewId: number) => {
     setError(null);
-    setFinalizing(true);
+    setFinalizingPreviewId(previewId);
     try {
       const result = await generateFinalize(
         session.session_id,
@@ -52,7 +53,7 @@ export function HistorySessionModal({ session, onClose, onFinalized, availablePr
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate the 4K image");
     } finally {
-      setFinalizing(false);
+      setFinalizingPreviewId(null);
     }
   };
 
@@ -97,7 +98,6 @@ export function HistorySessionModal({ session, onClose, onFinalized, availablePr
           </div>
         </SheetHeader>
 
-        {finalizing && <ProgressIndicator label="Finishing in 4K — this can take a minute" />}
         {error && <p className="text-sm text-red-400">{error}</p>}
 
         <div className="flex flex-col gap-4">
@@ -177,6 +177,11 @@ export function HistorySessionModal({ session, onClose, onFinalized, availablePr
                       >
                         Generate 4K
                       </Button>
+                    </div>
+                  )}
+                  {finalizingPreviewId === p.preview_id && (
+                    <div className="absolute inset-x-0 top-0">
+                      <ProgressBar className="h-1 rounded-none" />
                     </div>
                   )}
                 </div>
