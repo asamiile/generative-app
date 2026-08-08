@@ -17,5 +17,8 @@ frontend/.env.local
 frontend/public/*
 !frontend/public/.gitkeep
 
+# Personal workflow notes (Claude Cowork task templates, etc.) -- not part of the app
+.cowork/
+
 # OS
 .DS_Store

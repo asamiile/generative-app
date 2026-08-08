@@ -17,8 +17,19 @@ class GenerationStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class ProviderType(str, enum.Enum):
+    GEMINI = "gemini"
+    LOCAL = "local"
+    OPENAI = "openai"
+    STABILITY = "stability"
+
+
 def _status_enum() -> SAEnum:
     return SAEnum(GenerationStatus, values_callable=lambda e: [member.value for member in e])
+
+
+def _provider_enum() -> SAEnum:
+    return SAEnum(ProviderType, values_callable=lambda e: [member.value for member in e])
 
 
 class GenerationSession(Base):
@@ -33,6 +44,13 @@ class GenerationSession(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     original_prompt: Mapped[str] = mapped_column(String(200), nullable=False)
     enhanced_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    # Provider used to generate the 4 previews. Finalize is independently selectable
+    # per preview (see PreviewImage.final_provider) -- local CPU-only finalize can be
+    # too slow/unreliable at high resolution, so a session previewed locally can still
+    # be finalized with a different (e.g. cloud) provider.
+    provider: Mapped[ProviderType] = mapped_column(
+        _provider_enum(), nullable=False, server_default=ProviderType.GEMINI.value
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
@@ -66,5 +84,9 @@ class PreviewImage(Base):
     final_image_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     final_status: Mapped[GenerationStatus | None] = mapped_column(_status_enum(), nullable=True)
     final_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provider used for THIS preview's finalize attempt -- may differ from the
+    # session's provider (e.g. previewed locally, finalized with Gemini because local
+    # finalize at high resolution can take hours). NULL until finalize is attempted.
+    final_provider: Mapped[ProviderType | None] = mapped_column(_provider_enum(), nullable=True)
     resolution: Mapped[str | None] = mapped_column(String(16), nullable=True)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

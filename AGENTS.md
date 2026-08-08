@@ -4,11 +4,12 @@ Instructions for AI agents working in this repository. See [.agents/docs/overvie
 
 ## Project overview
 
-A local web app that uses the Gemini API to generate photorealistic-only images from short text prompts (MVP). The repo is named `generative-app` because it may expand beyond images (text/video, etc.) later.
+A local web app that generates photorealistic-only images from short text prompts (MVP). The repo is named `generative-app` because it may expand beyond images (text/video, etc.) later.
 
 - Backend: `backend/` (FastAPI, Python, SQLAlchemy, SQLite, Alembic)
 - Frontend: `frontend/` (Next.js App Router, TypeScript, Tailwind CSS)
 - Runtime: Docker / docker-compose (local only for now, no cloud deployment)
+- Image generation providers (pluggable, see [.agents/docs/overview.md](.agents/docs/overview.md#providers)): **Google** (Gemini API, implemented) and **Local** (Ollama + ComfyUI, implemented) are live; **Stability AI** is planned next (credits already available); **OpenAI** is a candidate under consideration. Adobe Firefly API was evaluated and rejected — it requires a separate Enterprise agreement (~$1,000/month minimum) that a consumer Creative Cloud plan does not unlock.
 
 ## Setup and run commands
 

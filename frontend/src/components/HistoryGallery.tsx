@@ -7,15 +7,24 @@ import {
   resolveImageUrl,
   type HistorySessionItem,
   type HistorySort,
+  type Provider,
 } from "@/lib/api";
 import { HistorySessionModal } from "@/components/HistorySessionModal";
+import { PROVIDER_LABEL, ProviderSelect, useAvailableProviders } from "@/components/ProviderSelect";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { LONG_TIMEOUT_MS } from "@/lib/timeouts";
 
 const PAGE_SIZE = 20;
 // The backend commits the sessions row before generating previews, so a session with
-// zero previews is normally still in progress. Cap how long we assume that, matching
-// the extended fetch timeout in lib/backendFetch.ts, so a session whose request
-// actually crashed doesn't show "Generating…" forever.
-const GENERATING_THRESHOLD_MS = 10 * 60 * 1000;
+// zero previews is normally still in progress. Cap how long we assume that at the
+// same value the fetch itself is allowed to run (lib/backendFetch.ts) -- previously
+// hardcoded to 10 minutes here, which was far shorter than the actual timeout and
+// caused slow (especially local-provider) generations to show "Generation failed"
+// well before they'd actually failed.
+const GENERATING_THRESHOLD_MS = LONG_TIMEOUT_MS;
 
 function isLikelyGenerating(session: HistorySessionItem): boolean {
   if (session.previews.length > 0) return false;
@@ -26,13 +35,18 @@ function SessionMeta({ item }: { item: HistorySessionItem }) {
   return (
     <div className="flex flex-col gap-1">
       <p className="truncate text-sm text-ink-secondary">{item.original_prompt}</p>
-      <p className="font-mono text-xs text-ink-faint">{new Date(item.created_at).toLocaleString()}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-xs text-ink-faint">{new Date(item.created_at).toLocaleString()}</p>
+        <Badge size="sm">{PROVIDER_LABEL[item.provider]}</Badge>
+      </div>
     </div>
   );
 }
 
 function thumbnailPath(session: HistorySessionItem): string | null {
   // If multiple previews have been finalized to 4K, use the most recently finalized one as the thumbnail.
+  // The grid always displays it square (object-cover), matching the design regardless
+  // of the underlying image's own aspect ratio.
   const finalized = session.previews.filter((p) => p.final_status === "success" && p.final_image_path);
   if (finalized.length > 0) {
     const latest = finalized.reduce((a, b) => ((b.finalized_at ?? "") > (a.finalized_at ?? "") ? b : a));
@@ -42,6 +56,7 @@ function thumbnailPath(session: HistorySessionItem): string | null {
 }
 
 export function HistoryGallery() {
+  const availableProviders = useAvailableProviders();
   const [items, setItems] = useState<HistorySessionItem[]>([]);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -50,7 +65,15 @@ export function HistoryGallery() {
   const [openSessionId, setOpenSessionId] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<HistorySort>("newest");
-  const [regeneratingSessionId, setRegeneratingSessionId] = useState<number | null>(null);
+  // A Set, not a single ID: regenerating two sessions back-to-back (before the first
+  // finishes) previously shared one ID, so starting the second wiped the first's
+  // "Regenerating…" state even though its request was still in flight.
+  const [regeneratingSessionIds, setRegeneratingSessionIds] = useState<Set<number>>(new Set());
+  // Regenerate provider is independently selectable per session (defaults to the
+  // provider that failed), same rationale/pattern as finalize's provider dropdown.
+  const [regenerateProviderBySession, setRegenerateProviderBySession] = useState<
+    Record<number, Provider>
+  >({});
   // Don't show either "No history yet" or "Load more" until the first fetch resolves.
   // Judging solely from items/hasMore's initial values (empty array / true) would make
   // both conditions true for a moment before the fetch completes.
@@ -104,15 +127,19 @@ export function HistoryGallery() {
     setSort((prev) => (prev === "newest" ? "oldest" : "newest"));
   };
 
+  const getRegenerateProvider = (item: HistorySessionItem): Provider =>
+    regenerateProviderBySession[item.session_id] ?? item.provider;
+
   const handleRegenerate = async (item: HistorySessionItem) => {
-    setRegeneratingSessionId(item.session_id);
+    setRegeneratingSessionIds((prev) => new Set(prev).add(item.session_id));
     setError(null);
     try {
-      const result = await generatePreview(item.original_prompt);
+      const result = await generatePreview(item.original_prompt, getRegenerateProvider(item));
       const newItem: HistorySessionItem = {
         session_id: result.session_id,
         original_prompt: item.original_prompt,
         enhanced_prompt: result.enhanced_prompt,
+        provider: result.provider,
         created_at: new Date().toISOString(),
         previews: result.previews,
       };
@@ -121,11 +148,20 @@ export function HistoryGallery() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to regenerate previews");
     } finally {
-      setRegeneratingSessionId(null);
+      setRegeneratingSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.session_id);
+        return next;
+      });
     }
   };
 
-  const handleFinalized = (sessionId: number, previewId: number, imagePath: string) => {
+  const handleFinalized = (
+    sessionId: number,
+    previewId: number,
+    imagePath: string,
+    provider: Provider,
+  ) => {
     const finalizedAt = new Date().toISOString();
     setItems((prev) =>
       prev.map((item) =>
@@ -134,7 +170,13 @@ export function HistoryGallery() {
               ...item,
               previews: item.previews.map((p) =>
                 p.preview_id === previewId
-                  ? { ...p, final_image_path: imagePath, final_status: "success", finalized_at: finalizedAt }
+                  ? {
+                      ...p,
+                      final_image_path: imagePath,
+                      final_status: "success",
+                      final_provider: provider,
+                      finalized_at: finalizedAt,
+                    }
                   : p,
               ),
             }
@@ -172,30 +214,25 @@ export function HistoryGallery() {
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.3-4.3" />
             </svg>
-            <input
-              placeholder="Search prompts"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full border-none bg-transparent text-sm text-ink-secondary outline-none placeholder:text-ink-muted"
-            />
+            <Input placeholder="Search prompts" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
-          <button
-            type="button"
-            onClick={toggleSort}
-            title={sort === "newest" ? "Sorted newest first" : "Sorted oldest first"}
-            className="flex items-center gap-1 rounded-md border border-app-border px-3 py-2 text-sm text-ink-secondary transition hover:bg-app-surfaceAlt"
-          >
-            {sort === "newest" ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M6 12h12M10 18h4" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 6H3M18 12H6M14 18h-4" />
-              </svg>
-            )}
-            {sort === "newest" ? "Newest" : "Oldest"}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" onClick={toggleSort} className="gap-1 px-3 py-2">
+                {sort === "newest" ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 6h18M6 12h12M10 18h4" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 6H3M18 12H6M14 18h-4" />
+                  </svg>
+                )}
+                {sort === "newest" ? "Newest" : "Oldest"}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{sort === "newest" ? "Sorted newest first" : "Sorted oldest first"}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -210,11 +247,12 @@ export function HistoryGallery() {
           <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4">
             {filteredItems.map((item) => {
               const thumbnail = thumbnailPath(item);
-              const isRegenerating = regeneratingSessionId === item.session_id;
+              const isRegenerating = regeneratingSessionIds.has(item.session_id);
 
               if (!thumbnail && isLikelyGenerating(item)) {
                 // The sessions row commits before previews exist, so zero previews on
-                // a recent session means it's still generating, not failed.
+                // a recent session means it's still generating, not failed. Square:
+                // matches the (square) previews that will land here once ready.
                 return (
                   <div key={item.session_id} className="flex flex-col gap-2 text-left">
                     <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-lg bg-app-surface text-ink-muted">
@@ -239,20 +277,37 @@ export function HistoryGallery() {
               if (!thumbnail) {
                 // Session where every preview failed: there's no image to show in the
                 // modal, so the card isn't clickable — show a regenerate button instead.
+                const regenerateProvider = getRegenerateProvider(item);
+
                 return (
                   <div key={item.session_id} className="flex flex-col gap-2 text-left">
                     <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-app-surface">
                       <div className="flex h-full w-full items-center justify-center text-xs text-red-400">
                         Generation failed
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRegenerate(item)}
-                        disabled={isRegenerating}
-                        className="absolute top-2 right-2 rounded-md border border-app-border bg-[#0a0e12]/75 px-3 py-2 text-sm text-ink-secondary backdrop-blur-sm transition hover:bg-app-surfaceAlt disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isRegenerating ? "Regenerating…" : "Regenerate"}
-                      </button>
+                      <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                        <ProviderSelect
+                          value={regenerateProvider}
+                          disabled={isRegenerating}
+                          title={`Provider: ${PROVIDER_LABEL[regenerateProvider]}`}
+                          options={availableProviders}
+                          onChange={(prov) =>
+                            setRegenerateProviderBySession((prev) => ({
+                              ...prev,
+                              [item.session_id]: prov,
+                            }))
+                          }
+                          triggerClassName="bg-[#0a0e12]/75 px-2.5 py-1.5 text-xs backdrop-blur-sm"
+                        />
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          onClick={() => handleRegenerate(item)}
+                          disabled={isRegenerating}
+                        >
+                          {isRegenerating ? "Regenerating…" : "Regenerate"}
+                        </Button>
+                      </div>
                     </div>
                     <SessionMeta item={item} />
                   </div>
@@ -282,14 +337,14 @@ export function HistoryGallery() {
         ) : null}
 
         {initialLoadDone && hasMore && !query && (
-          <button
-            type="button"
+          <Button
+            variant="outline"
             onClick={loadMore}
             disabled={loading}
-            className="self-center rounded-md border border-app-border px-7 py-3 text-sm text-ink-secondary transition hover:bg-app-surfaceAlt disabled:cursor-not-allowed disabled:opacity-50"
+            className="self-center px-7 py-3"
           >
             {loading ? "Loading…" : "Load more"}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -298,6 +353,7 @@ export function HistoryGallery() {
           session={openSession}
           onClose={() => setOpenSessionId(null)}
           onFinalized={handleFinalized}
+          availableProviders={availableProviders}
         />
       )}
     </div>
