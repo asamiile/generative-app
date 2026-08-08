@@ -71,6 +71,7 @@ def create_preview_session(
     monkeypatch: pytest.MonkeyPatch,
     prompt: str = "a cat",
     preview_paths: list[str | None] | None = None,
+    provider: str = "gemini",
 ) -> dict:
     """Call /api/generate/preview with providers.gemini's Gemini calls mocked out."""
     monkeypatch.setattr(gemini, "expand_prompt", AsyncMock(return_value=f"enhanced: {prompt}"))
@@ -79,6 +80,8 @@ def create_preview_session(
         "generate_preview_batch",
         AsyncMock(return_value=preview_paths or list(DEFAULT_PREVIEW_PATHS)),
     )
-    res = client.post("/api/generate/preview", json={"prompt": prompt}, headers=headers)
+    res = client.post(
+        "/api/generate/preview", json={"prompt": prompt, "provider": provider}, headers=headers
+    )
     assert res.status_code == 200, res.text
     return res.json()

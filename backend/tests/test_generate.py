@@ -9,8 +9,38 @@ def test_generate_preview_requires_auth(client):
     assert res.status_code == 401
 
 
+def test_get_available_providers_requires_auth(client):
+    res = client.get("/api/providers")
+    assert res.status_code == 401
+
+
+def test_get_available_providers_local_and_gemini_only_by_default(client, auth_headers, monkeypatch):
+    """conftest.py sets GEMINI_API_KEY but not OPENAI_API_KEY/STABILITY_API_KEY --
+    local is always available (no key needed), gemini has a key, the other two don't."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("STABILITY_API_KEY", raising=False)
+    res = client.get("/api/providers", headers=auth_headers)
+    assert res.status_code == 200
+    assert res.json() == ["local", "gemini"]
+
+
+def test_get_available_providers_includes_providers_with_keys_set(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("STABILITY_API_KEY", "test-stability-key")
+    res = client.get("/api/providers", headers=auth_headers)
+    assert res.status_code == 200
+    assert res.json() == ["local", "gemini", "openai", "stability"]
+
+
 def test_generate_preview_rejects_empty_prompt(client, auth_headers):
-    res = client.post("/api/generate/preview", json={"prompt": ""}, headers=auth_headers)
+    res = client.post(
+        "/api/generate/preview", json={"prompt": "", "provider": "gemini"}, headers=auth_headers
+    )
+    assert res.status_code == 422
+
+
+def test_generate_preview_rejects_missing_provider(client, auth_headers):
+    res = client.post("/api/generate/preview", json={"prompt": "a cat"}, headers=auth_headers)
     assert res.status_code == 422
 
 
@@ -274,7 +304,9 @@ def test_generate_finalize_with_openai_provider(client, auth_headers, monkeypatc
             ]
         ),
     )
-    preview_res = client.post("/api/generate/preview", json={"prompt": "a cat"}, headers=auth_headers)
+    preview_res = client.post(
+        "/api/generate/preview", json={"prompt": "a cat", "provider": "gemini"}, headers=auth_headers
+    )
     preview_body = preview_res.json()
     preview_id = preview_body["previews"][0]["preview_id"]
 

@@ -33,7 +33,7 @@ At least one provider needs to be configured — pick one from the table above a
 2. Clone this repository.
 3. Pick a model from [Available models](#available-models) and follow its setup section below (issue an API key, or — for **Local** — see [Local provider setup](#local-provider-setup-ollama--comfyui-optional)).
 4. Copy the env file templates and configure the shared settings:
-   - `backend/.env.example` → `backend/.env`: set `APP_API_TOKEN` (a long random string) and `DEFAULT_IMAGE_PROVIDER` to match the model you picked, plus whichever provider's API key from step 3.
+   - `backend/.env.example` → `backend/.env`: set `APP_API_TOKEN` (a long random string), plus whichever provider's API key from step 3.
    - `frontend/.env.local.example` → `frontend/.env.local`: set `APP_API_TOKEN` to the same value as `backend/.env`.
    - Adjust `RATE_LIMIT_PER_HOUR` if needed.
 
@@ -167,7 +167,7 @@ Useful for confirming `APP_API_TOKEN` and a provider's API key are wired up corr
 curl -s -X POST http://localhost:8000/api/generate/preview \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <APP_API_TOKEN>" \
-  -d '{"prompt": "a quiet hot spring inn surrounded by mountains"}'
+  -d '{"prompt": "a quiet hot spring inn surrounded by mountains", "provider": "gemini"}'
 ```
 
 ## Release

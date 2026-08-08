@@ -19,9 +19,10 @@ type Props = {
   session: HistorySessionItem;
   onClose: () => void;
   onFinalized: (sessionId: number, previewId: number, imagePath: string, provider: Provider) => void;
+  availableProviders: Provider[];
 };
 
-export function HistorySessionModal({ session, onClose, onFinalized }: Props) {
+export function HistorySessionModal({ session, onClose, onFinalized, availableProviders }: Props) {
   const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -162,6 +163,7 @@ export function HistorySessionModal({ session, onClose, onFinalized }: Props) {
                         value={selectedProvider}
                         disabled={finalizing}
                         title={`Provider: ${PROVIDER_LABEL[selectedProvider]}`}
+                        options={availableProviders}
                         onChange={(prov) =>
                           setProviderByPreview((prev) => ({ ...prev, [p.preview_id]: prov }))
                         }

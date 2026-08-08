@@ -10,18 +10,21 @@ import {
   type Provider,
 } from "@/lib/api";
 import { HistorySessionModal } from "@/components/HistorySessionModal";
-import { PROVIDER_LABEL, ProviderSelect } from "@/components/ProviderSelect";
+import { PROVIDER_LABEL, ProviderSelect, useAvailableProviders } from "@/components/ProviderSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { LONG_TIMEOUT_MS } from "@/lib/timeouts";
 
 const PAGE_SIZE = 20;
 // The backend commits the sessions row before generating previews, so a session with
-// zero previews is normally still in progress. Cap how long we assume that, matching
-// the extended fetch timeout in lib/backendFetch.ts, so a session whose request
-// actually crashed doesn't show "Generating…" forever.
-const GENERATING_THRESHOLD_MS = 10 * 60 * 1000;
+// zero previews is normally still in progress. Cap how long we assume that at the
+// same value the fetch itself is allowed to run (lib/backendFetch.ts) -- previously
+// hardcoded to 10 minutes here, which was far shorter than the actual timeout and
+// caused slow (especially local-provider) generations to show "Generation failed"
+// well before they'd actually failed.
+const GENERATING_THRESHOLD_MS = LONG_TIMEOUT_MS;
 
 function isLikelyGenerating(session: HistorySessionItem): boolean {
   if (session.previews.length > 0) return false;
@@ -53,6 +56,7 @@ function thumbnailPath(session: HistorySessionItem): string | null {
 }
 
 export function HistoryGallery() {
+  const availableProviders = useAvailableProviders();
   const [items, setItems] = useState<HistorySessionItem[]>([]);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -286,6 +290,7 @@ export function HistoryGallery() {
                           value={regenerateProvider}
                           disabled={isRegenerating}
                           title={`Provider: ${PROVIDER_LABEL[regenerateProvider]}`}
+                          options={availableProviders}
                           onChange={(prov) =>
                             setRegenerateProviderBySession((prev) => ({
                               ...prev,
@@ -348,6 +353,7 @@ export function HistoryGallery() {
           session={openSession}
           onClose={() => setOpenSessionId(null)}
           onFinalized={handleFinalized}
+          availableProviders={availableProviders}
         />
       )}
     </div>

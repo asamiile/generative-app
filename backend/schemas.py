@@ -7,8 +7,10 @@ from models import GenerationStatus, ProviderType
 
 class GeneratePreviewRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=200)
-    # Falls back to DEFAULT_IMAGE_PROVIDER (env var) when omitted.
-    provider: ProviderType | None = None
+    # Required, not defaulted -- the frontend always sends an explicit choice, and
+    # with 4 equally-supported providers there's no longer a neutral default to
+    # fall back to (see DEFAULT_IMAGE_PROVIDER's removal in main.py).
+    provider: ProviderType
 
 
 class PreviewImageOut(BaseModel):

@@ -14,7 +14,7 @@ Image generation is provider-pluggable: `gemini` (default), `local` (Ollama + Co
 
 Generates 4 low-resolution preview candidates. Rate-limited (`RATE_LIMIT_PER_HOUR`, default 10/hour, shared by all providers — see [database.md](database.md)).
 
-- Request: `{"prompt": "a quiet hot spring inn surrounded by mountains", "provider": "gemini"}` (1–200 chars; `provider` optional, defaults to `DEFAULT_IMAGE_PROVIDER` env var when omitted)
+- Request: `{"prompt": "a quiet hot spring inn surrounded by mountains", "provider": "gemini"}` (prompt 1–200 chars; `provider` **required** — no default, since the frontend always sends an explicit choice and there's no longer a neutral one to fall back to across 4 equally-supported providers)
 - Processing:
   1. Resolve the provider (`gemini`, `local`, `openai`, or `stability`) and expand the prompt into an English, photorealistic-only prompt (same system prompt for all — see [overview.md](overview.md)).
   2. Create a `sessions` row (with its `provider`) and commit immediately — the write lock must be released before the slow generation call, or a concurrent request fails with `database is locked`.

@@ -55,7 +55,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return res.json() as Promise<T>;
 }
 
-export function generatePreview(prompt: string, provider?: Provider): Promise<GeneratePreviewResponse> {
+export function generatePreview(prompt: string, provider: Provider): Promise<GeneratePreviewResponse> {
   return apiFetch<GeneratePreviewResponse>("/api/generate/preview", {
     method: "POST",
     body: JSON.stringify({ prompt, provider }),
@@ -83,6 +83,10 @@ export function getHistory(
   return apiFetch<HistorySessionItem[]>(
     `/api/history?limit=${limit}&offset=${offset}&sort=${sort}`,
   );
+}
+
+export function getAvailableProviders(): Promise<Provider[]> {
+  return apiFetch<Provider[]>("/api/providers");
 }
 
 export function resolveImageUrl(imagePath: string): string {

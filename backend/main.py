@@ -30,12 +30,22 @@ from schemas import (
     PreviewImageOut,
 )
 
+def _as_utc(dt: datetime) -> datetime:
+    """SQLite round-trips DateTime columns as naive datetimes even when declared
+    DateTime(timezone=True) -- but the values are always UTC (func.now() on SQLite
+    returns UTC, and app code that sets these writes datetime.now(timezone.utc)).
+    Attach UTC tzinfo explicitly before serializing into a response: Pydantic
+    serializes a naive datetime with no offset suffix, and JS's `new Date(...)`
+    then misparses that as local time instead of UTC.
+    """
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
 RATE_LIMIT_PER_HOUR = os.environ.get("RATE_LIMIT_PER_HOUR", "10")
 # RATE_LIMIT_PER_HOUR is shared by both providers rather than split (e.g. a separate
 # RATE_LIMIT_PER_HOUR_LOCAL): local generation has no per-request API cost, but a
 # single-instance ComfyUI/Ollama setup still benefits from the same cap to avoid
 # queue pile-up. Split this out later if that turns out to be too conservative.
-DEFAULT_IMAGE_PROVIDER = os.environ.get("DEFAULT_IMAGE_PROVIDER", "gemini")
 
 
 @asynccontextmanager
@@ -65,6 +75,27 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get(
+    "/api/providers",
+    response_model=list[ProviderType],
+    dependencies=[Depends(verify_token)],
+)
+def get_available_providers() -> list[ProviderType]:
+    """Providers with everything needed to actually run, so the frontend can hide
+    the rest from the model picker instead of letting a request fail on submit.
+    `local` needs no API key (just Ollama/ComfyUI, which have working defaults),
+    so it's always included; the other three need their key set in backend/.env.
+    """
+    available = [ProviderType.LOCAL]
+    if os.environ.get("GEMINI_API_KEY"):
+        available.append(ProviderType.GEMINI)
+    if os.environ.get("OPENAI_API_KEY"):
+        available.append(ProviderType.OPENAI)
+    if os.environ.get("STABILITY_API_KEY"):
+        available.append(ProviderType.STABILITY)
+    return available
+
+
 @app.post(
     "/api/generate/preview",
     response_model=GeneratePreviewResponse,
@@ -76,8 +107,7 @@ async def generate_preview(
     body: GeneratePreviewRequest,
     db: DBSession = Depends(get_db),
 ) -> GeneratePreviewResponse:
-    provider_name = body.provider or DEFAULT_IMAGE_PROVIDER
-    provider = get_provider(provider_name)
+    provider = get_provider(body.provider.value)
 
     enhanced_prompt = await provider.expand_prompt(body.prompt)
 
@@ -88,7 +118,7 @@ async def generate_preview(
     session = GenerationSession(
         original_prompt=body.prompt,
         enhanced_prompt=enhanced_prompt,
-        provider=ProviderType(provider_name),
+        provider=body.provider,
     )
     db.add(session)
     db.commit()
@@ -174,7 +204,7 @@ async def generate_finalize(
         image_path=preview.final_image_path,
         status=preview.final_status,
         provider=preview.final_provider,
-        created_at=preview.finalized_at,
+        created_at=_as_utc(preview.finalized_at),
     )
 
 
@@ -221,7 +251,7 @@ def get_history(
             original_prompt=s.original_prompt,
             enhanced_prompt=s.enhanced_prompt,
             provider=s.provider,
-            created_at=s.created_at,
+            created_at=_as_utc(s.created_at),
             previews=[
                 PreviewImageOut(
                     preview_id=p.id,
@@ -231,7 +261,7 @@ def get_history(
                     final_image_path=p.final_image_path,
                     final_status=p.final_status,
                     final_provider=p.final_provider,
-                    finalized_at=p.finalized_at,
+                    finalized_at=_as_utc(p.finalized_at) if p.finalized_at else None,
                 )
                 for p in previews_by_session[s.id]
             ],
