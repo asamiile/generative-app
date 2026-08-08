@@ -3,30 +3,23 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
-import uuid
-from pathlib import Path
 
 from google import genai
 from google.genai import errors, types
 
-BACKEND_ROOT = Path(__file__).parent
-STATIC_IMAGES_DIR = BACKEND_ROOT / "static" / "images"
-STATIC_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+from providers._storage import BACKEND_ROOT, save_image_bytes
+from providers.prompts import SYSTEM_PROMPT
 
 TEXT_MODEL = "gemini-3.6-flash"
 IMAGE_MODEL = "gemini-3-pro-image"
 PREVIEW_COUNT = 4
+# Only the 4K finalize targets this aspect ratio -- previews are left at the model's
+# default (square), matching the source images previews are meant to look like.
+# gemini-3-pro-image's image_config.aspect_ratio accepts "16:9" directly (confirmed
+# against docs 2026-08-09).
+IMAGE_ASPECT_RATIO = os.environ.get("GEMINI_ASPECT_RATIO", "16:9")
 # gemini-3-pro-image is high demand and can return 503 UNAVAILABLE, so retry with short backoff.
 IMAGE_RETRY_DELAYS_SECONDS = (2, 5, 10)
-
-# Absolute photorealistic-only rule. See .agents/docs/api.md for details.
-SYSTEM_PROMPT = """You are a prompt writer for a photorealistic image generation model.
-Rules:
-- Output ONLY the English prompt for the image generation model. No explanations, no quotes, no markdown.
-- The prompt MUST describe a photorealistic, live-action style photograph.
-- Anime, illustration, or drawn/cartoon styles are strictly forbidden.
-- Specify camera lens, depth of field, and lighting to reinforce a photographic look.
-"""
 
 _client: genai.Client | None = None
 
@@ -75,13 +68,6 @@ async def _generate_content_with_retry(**kwargs) -> types.GenerateContentRespons
     raise AssertionError("unreachable")
 
 
-def _save_image(image_bytes: bytes, mime_type: str) -> str:
-    extension = mimetypes.guess_extension(mime_type) or ".png"
-    filename = f"{uuid.uuid4()}{extension}"
-    (STATIC_IMAGES_DIR / filename).write_bytes(image_bytes)
-    return f"/static/images/{filename}"
-
-
 async def _generate_one_preview(enhanced_prompt: str) -> str | None:
     try:
         response = await _generate_content_with_retry(
@@ -96,7 +82,7 @@ async def _generate_one_preview(enhanced_prompt: str) -> str | None:
         # Don't let one failed preview take down the other 3 (caller records status: failed).
         return None
     extracted = _extract_image_part(response)
-    return _save_image(*extracted) if extracted else None
+    return save_image_bytes(*extracted) if extracted else None
 
 
 async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
@@ -123,11 +109,11 @@ async def generate_final_image(enhanced_prompt: str, reference_image_path: str) 
             contents=[reference_part, enhanced_prompt],
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
-                image_config=types.ImageConfig(image_size="4K"),
+                image_config=types.ImageConfig(image_size="4K", aspect_ratio=IMAGE_ASPECT_RATIO),
             ),
         )
     except errors.APIError:
         # The caller (main.py) records None as final_status: failed.
         return None
     extracted = _extract_image_part(response)
-    return _save_image(*extracted) if extracted else None
+    return save_image_bytes(*extracted) if extracted else None

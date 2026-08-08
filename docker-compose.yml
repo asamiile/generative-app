@@ -10,6 +10,50 @@ services:
     volumes:
       - backend_data:/app/data
       - backend_images:/app/static/images
+    depends_on:
+      - ollama
+      - comfyui
+
+  ollama:
+    build: ./ollama
+    ports:
+      # Host-side port shifted to 11435 to avoid clashing with a native Ollama
+      # install commonly bound to 11434 on the host. Backend talks to this
+      # container over the internal docker network at ollama:11434 regardless,
+      # so this only affects direct host-side access (e.g. curl from the Mac).
+      - "127.0.0.1:11435:11434"
+    volumes:
+      - ollama_models:/home/appuser/.ollama/models
+    # Uncomment for NVIDIA GPU passthrough on Linux (requires nvidia-container-toolkit).
+    # Docker Desktop on Apple Silicon has no GPU passthrough; local text generation
+    # is small enough to still run on CPU, just slower.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  comfyui:
+    build: ./comfyui
+    ports:
+      - "127.0.0.1:8188:8188"
+    volumes:
+      - comfyui_models:/app/models
+      - comfyui_output:/app/output
+    # Uncomment for NVIDIA GPU passthrough on Linux (requires nvidia-container-toolkit).
+    # Without a GPU, SDXL-class image generation is impractically slow -- see README.md.
+    # Also drop the image's default --cpu flag (comfyui/Dockerfile) by overriding
+    # the command here, or ComfyUI will ignore the passed-through GPU:
+    # command: ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188"]
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
   frontend:
     build:
@@ -33,3 +77,6 @@ volumes:
   backend_data:
   backend_images:
   frontend_node_modules:
+  ollama_models:
+  comfyui_models:
+  comfyui_output:

@@ -17,10 +17,10 @@ from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
-import services
 from auth import verify_token
 from database import get_db, init_db
-from models import GenerationSession, GenerationStatus, PreviewImage
+from models import GenerationSession, GenerationStatus, PreviewImage, ProviderType
+from providers import get_provider
 from schemas import (
     FinalizeRequest,
     FinalizeResponse,
@@ -31,6 +31,11 @@ from schemas import (
 )
 
 RATE_LIMIT_PER_HOUR = os.environ.get("RATE_LIMIT_PER_HOUR", "10")
+# RATE_LIMIT_PER_HOUR is shared by both providers rather than split (e.g. a separate
+# RATE_LIMIT_PER_HOUR_LOCAL): local generation has no per-request API cost, but a
+# single-instance ComfyUI/Ollama setup still benefits from the same cap to avoid
+# queue pile-up. Split this out later if that turns out to be too conservative.
+DEFAULT_IMAGE_PROVIDER = os.environ.get("DEFAULT_IMAGE_PROVIDER", "gemini")
 
 
 @asynccontextmanager
@@ -71,18 +76,25 @@ async def generate_preview(
     body: GeneratePreviewRequest,
     db: DBSession = Depends(get_db),
 ) -> GeneratePreviewResponse:
-    enhanced_prompt = await services.expand_prompt(body.prompt)
+    provider_name = body.provider or DEFAULT_IMAGE_PROVIDER
+    provider = get_provider(provider_name)
 
-    # Commit here to release the write lock before the slow Gemini call. Flushing
-    # without committing across a long external API call would hold SQLite's write
+    enhanced_prompt = await provider.expand_prompt(body.prompt)
+
+    # Commit here to release the write lock before the slow generation call. Flushing
+    # without committing across a long external call would hold SQLite's write
     # lock the whole time, making other requests fail immediately with
     # "database is locked".
-    session = GenerationSession(original_prompt=body.prompt, enhanced_prompt=enhanced_prompt)
+    session = GenerationSession(
+        original_prompt=body.prompt,
+        enhanced_prompt=enhanced_prompt,
+        provider=ProviderType(provider_name),
+    )
     db.add(session)
     db.commit()
     db.refresh(session)
 
-    image_paths = await services.generate_preview_batch(enhanced_prompt)
+    image_paths = await provider.generate_preview_batch(enhanced_prompt)
 
     previews: list[PreviewImage] = []
     for index, image_path in enumerate(image_paths):
@@ -103,6 +115,7 @@ async def generate_preview(
     return GeneratePreviewResponse(
         session_id=session.id,
         enhanced_prompt=enhanced_prompt,
+        provider=session.provider,
         previews=[
             PreviewImageOut(
                 preview_id=p.id,
@@ -134,7 +147,13 @@ async def generate_finalize(
     if preview is None or preview.session_id != session.id or preview.image_path is None:
         raise HTTPException(status_code=400, detail="invalid preview_id for this session")
 
-    image_path = await services.generate_final_image(session.enhanced_prompt, preview.image_path)
+    # Finalize defaults to the session's provider but can be overridden per preview
+    # (see .agents/docs/api.md) -- local CPU-only finalize can take hours at high
+    # resolution, so a session previewed locally may still want a fast/reliable
+    # cloud provider for the finalize step specifically.
+    provider_name = body.provider.value if body.provider else session.provider.value
+    provider = get_provider(provider_name)
+    image_path = await provider.generate_final_image(session.enhanced_prompt, preview.image_path)
 
     # The 4K result is kept per-preview so multiple previews in the same session can
     # each be finalized independently — a session-level field could only hold one,
@@ -142,6 +161,7 @@ async def generate_finalize(
     preview.final_image_path = image_path
     preview.final_status = GenerationStatus.SUCCESS if image_path else GenerationStatus.FAILED
     preview.final_error_message = None if image_path else "Failed to generate the final 4K image"
+    preview.final_provider = ProviderType(provider_name)
     preview.resolution = "4K"
     preview.finalized_at = datetime.now(timezone.utc)
 
@@ -153,6 +173,7 @@ async def generate_finalize(
         preview_id=preview.id,
         image_path=preview.final_image_path,
         status=preview.final_status,
+        provider=preview.final_provider,
         created_at=preview.finalized_at,
     )
 
@@ -199,6 +220,7 @@ def get_history(
             session_id=s.id,
             original_prompt=s.original_prompt,
             enhanced_prompt=s.enhanced_prompt,
+            provider=s.provider,
             created_at=s.created_at,
             previews=[
                 PreviewImageOut(
@@ -208,6 +230,7 @@ def get_history(
                     status=p.status,
                     final_image_path=p.final_image_path,
                     final_status=p.final_status,
+                    final_provider=p.final_provider,
                     finalized_at=p.finalized_at,
                 )
                 for p in previews_by_session[s.id]

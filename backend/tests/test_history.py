@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock
 
-import services
+from providers import gemini
 from conftest import create_preview_session
 
 
@@ -27,7 +27,7 @@ def test_history_reflects_finalized_preview_without_affecting_others(client, aut
     preview_body = create_preview_session(client, auth_headers, monkeypatch)
     preview_id = preview_body["previews"][2]["preview_id"]
     monkeypatch.setattr(
-        services, "generate_final_image", AsyncMock(return_value="/static/images/final.jpg")
+        gemini, "generate_final_image", AsyncMock(return_value="/static/images/final.jpg")
     )
     client.post(
         "/api/generate/finalize",

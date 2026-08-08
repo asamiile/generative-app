@@ -7,6 +7,7 @@ import {
   resolveImageUrl,
   type HistorySessionItem,
   type HistorySort,
+  type Provider,
 } from "@/lib/api";
 import { HistorySessionModal } from "@/components/HistorySessionModal";
 
@@ -22,17 +23,31 @@ function isLikelyGenerating(session: HistorySessionItem): boolean {
   return Date.now() - new Date(session.created_at).getTime() < GENERATING_THRESHOLD_MS;
 }
 
+const PROVIDER_LABEL: Record<HistorySessionItem["provider"], string> = {
+  local: "Local",
+  gemini: "Gemini",
+  openai: "OpenAI",
+  stability: "Stability AI",
+};
+
 function SessionMeta({ item }: { item: HistorySessionItem }) {
   return (
     <div className="flex flex-col gap-1">
       <p className="truncate text-sm text-ink-secondary">{item.original_prompt}</p>
-      <p className="font-mono text-xs text-ink-faint">{new Date(item.created_at).toLocaleString()}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-xs text-ink-faint">{new Date(item.created_at).toLocaleString()}</p>
+        <span className="rounded-full border border-app-border px-1.5 py-0.5 text-[10px] text-ink-muted">
+          {PROVIDER_LABEL[item.provider]}
+        </span>
+      </div>
     </div>
   );
 }
 
 function thumbnailPath(session: HistorySessionItem): string | null {
   // If multiple previews have been finalized to 4K, use the most recently finalized one as the thumbnail.
+  // The grid always displays it square (object-cover), matching the design regardless
+  // of the underlying image's own aspect ratio.
   const finalized = session.previews.filter((p) => p.final_status === "success" && p.final_image_path);
   if (finalized.length > 0) {
     const latest = finalized.reduce((a, b) => ((b.finalized_at ?? "") > (a.finalized_at ?? "") ? b : a));
@@ -50,7 +65,15 @@ export function HistoryGallery() {
   const [openSessionId, setOpenSessionId] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<HistorySort>("newest");
-  const [regeneratingSessionId, setRegeneratingSessionId] = useState<number | null>(null);
+  // A Set, not a single ID: regenerating two sessions back-to-back (before the first
+  // finishes) previously shared one ID, so starting the second wiped the first's
+  // "Regenerating…" state even though its request was still in flight.
+  const [regeneratingSessionIds, setRegeneratingSessionIds] = useState<Set<number>>(new Set());
+  // Regenerate provider is independently selectable per session (defaults to the
+  // provider that failed), same rationale/pattern as finalize's provider dropdown.
+  const [regenerateProviderBySession, setRegenerateProviderBySession] = useState<
+    Record<number, Provider>
+  >({});
   // Don't show either "No history yet" or "Load more" until the first fetch resolves.
   // Judging solely from items/hasMore's initial values (empty array / true) would make
   // both conditions true for a moment before the fetch completes.
@@ -104,15 +127,19 @@ export function HistoryGallery() {
     setSort((prev) => (prev === "newest" ? "oldest" : "newest"));
   };
 
+  const getRegenerateProvider = (item: HistorySessionItem): Provider =>
+    regenerateProviderBySession[item.session_id] ?? item.provider;
+
   const handleRegenerate = async (item: HistorySessionItem) => {
-    setRegeneratingSessionId(item.session_id);
+    setRegeneratingSessionIds((prev) => new Set(prev).add(item.session_id));
     setError(null);
     try {
-      const result = await generatePreview(item.original_prompt);
+      const result = await generatePreview(item.original_prompt, getRegenerateProvider(item));
       const newItem: HistorySessionItem = {
         session_id: result.session_id,
         original_prompt: item.original_prompt,
         enhanced_prompt: result.enhanced_prompt,
+        provider: result.provider,
         created_at: new Date().toISOString(),
         previews: result.previews,
       };
@@ -121,11 +148,20 @@ export function HistoryGallery() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to regenerate previews");
     } finally {
-      setRegeneratingSessionId(null);
+      setRegeneratingSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.session_id);
+        return next;
+      });
     }
   };
 
-  const handleFinalized = (sessionId: number, previewId: number, imagePath: string) => {
+  const handleFinalized = (
+    sessionId: number,
+    previewId: number,
+    imagePath: string,
+    provider: Provider,
+  ) => {
     const finalizedAt = new Date().toISOString();
     setItems((prev) =>
       prev.map((item) =>
@@ -134,7 +170,13 @@ export function HistoryGallery() {
               ...item,
               previews: item.previews.map((p) =>
                 p.preview_id === previewId
-                  ? { ...p, final_image_path: imagePath, final_status: "success", finalized_at: finalizedAt }
+                  ? {
+                      ...p,
+                      final_image_path: imagePath,
+                      final_status: "success",
+                      final_provider: provider,
+                      finalized_at: finalizedAt,
+                    }
                   : p,
               ),
             }
@@ -210,11 +252,12 @@ export function HistoryGallery() {
           <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4">
             {filteredItems.map((item) => {
               const thumbnail = thumbnailPath(item);
-              const isRegenerating = regeneratingSessionId === item.session_id;
+              const isRegenerating = regeneratingSessionIds.has(item.session_id);
 
               if (!thumbnail && isLikelyGenerating(item)) {
                 // The sessions row commits before previews exist, so zero previews on
-                // a recent session means it's still generating, not failed.
+                // a recent session means it's still generating, not failed. Square:
+                // matches the (square) previews that will land here once ready.
                 return (
                   <div key={item.session_id} className="flex flex-col gap-2 text-left">
                     <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-lg bg-app-surface text-ink-muted">
@@ -239,20 +282,55 @@ export function HistoryGallery() {
               if (!thumbnail) {
                 // Session where every preview failed: there's no image to show in the
                 // modal, so the card isn't clickable — show a regenerate button instead.
+                const regenerateProvider = getRegenerateProvider(item);
+
                 return (
                   <div key={item.session_id} className="flex flex-col gap-2 text-left">
                     <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-app-surface">
                       <div className="flex h-full w-full items-center justify-center text-xs text-red-400">
                         Generation failed
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRegenerate(item)}
-                        disabled={isRegenerating}
-                        className="absolute top-2 right-2 rounded-md border border-app-border bg-[#0a0e12]/75 px-3 py-2 text-sm text-ink-secondary backdrop-blur-sm transition hover:bg-app-surfaceAlt disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isRegenerating ? "Regenerating…" : "Regenerate"}
-                      </button>
+                      <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                        <div className="relative flex items-center">
+                          <select
+                            value={regenerateProvider}
+                            disabled={isRegenerating}
+                            title={`Provider: ${PROVIDER_LABEL[regenerateProvider]}`}
+                            onChange={(e) =>
+                              setRegenerateProviderBySession((prev) => ({
+                                ...prev,
+                                [item.session_id]: e.target.value as Provider,
+                              }))
+                            }
+                            className="cursor-pointer appearance-none rounded-md border border-app-border bg-[#0a0e12]/75 py-1.5 pl-2.5 pr-6 text-xs text-ink-secondary backdrop-blur-sm outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {(Object.keys(PROVIDER_LABEL) as Provider[]).map((prov) => (
+                              <option key={prov} value={prov}>
+                                {PROVIDER_LABEL[prov]}
+                              </option>
+                            ))}
+                          </select>
+                          <svg
+                            width="9"
+                            height="9"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="3"
+                            className="pointer-events-none absolute right-2 text-ink-muted"
+                          >
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRegenerate(item)}
+                          disabled={isRegenerating}
+                          className="rounded-md border border-app-border bg-[#0a0e12]/75 px-3.5 py-1.5 text-xs text-ink-secondary backdrop-blur-sm transition hover:bg-app-surfaceAlt disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isRegenerating ? "Regenerating…" : "Regenerate"}
+                        </button>
+                      </div>
                     </div>
                     <SessionMeta item={item} />
                   </div>

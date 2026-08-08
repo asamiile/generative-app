@@ -2,11 +2,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from models import GenerationStatus
+from models import GenerationStatus, ProviderType
 
 
 class GeneratePreviewRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=200)
+    # Falls back to DEFAULT_IMAGE_PROVIDER (env var) when omitted.
+    provider: ProviderType | None = None
 
 
 class PreviewImageOut(BaseModel):
@@ -17,18 +19,26 @@ class PreviewImageOut(BaseModel):
     # The result of finalizing this preview to 4K. Each preview holds its own independently.
     final_image_path: str | None = None
     final_status: GenerationStatus | None = None
+    # Provider used for this preview's finalize attempt, which may differ from the
+    # session's (preview-generating) provider. None until finalize is attempted.
+    final_provider: ProviderType | None = None
     finalized_at: datetime | None = None
 
 
 class GeneratePreviewResponse(BaseModel):
     session_id: int
     enhanced_prompt: str
+    provider: ProviderType
     previews: list[PreviewImageOut]
 
 
 class FinalizeRequest(BaseModel):
     session_id: int
     preview_id: int
+    # Falls back to the session's provider when omitted -- may differ from it (e.g.
+    # previewed locally, finalized with Gemini because local finalize is slow at
+    # high resolution).
+    provider: ProviderType | None = None
 
 
 class FinalizeResponse(BaseModel):
@@ -36,6 +46,7 @@ class FinalizeResponse(BaseModel):
     preview_id: int
     image_path: str | None
     status: GenerationStatus
+    provider: ProviderType
     created_at: datetime
 
 
@@ -43,5 +54,6 @@ class HistorySessionItem(BaseModel):
     session_id: int
     original_prompt: str
     enhanced_prompt: str
+    provider: ProviderType
     created_at: datetime
     previews: list[PreviewImageOut]

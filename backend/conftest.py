@@ -23,8 +23,8 @@ from sqlalchemy.orm import sessionmaker
 
 import database
 import main
-import services
 from models import Base
+from providers import gemini
 
 DEFAULT_PREVIEW_PATHS = [
     "/static/images/a.jpg",
@@ -72,10 +72,10 @@ def create_preview_session(
     prompt: str = "a cat",
     preview_paths: list[str | None] | None = None,
 ) -> dict:
-    """Call /api/generate/preview with services.py's Gemini calls mocked out."""
-    monkeypatch.setattr(services, "expand_prompt", AsyncMock(return_value=f"enhanced: {prompt}"))
+    """Call /api/generate/preview with providers.gemini's Gemini calls mocked out."""
+    monkeypatch.setattr(gemini, "expand_prompt", AsyncMock(return_value=f"enhanced: {prompt}"))
     monkeypatch.setattr(
-        services,
+        gemini,
         "generate_preview_batch",
         AsyncMock(return_value=preview_paths or list(DEFAULT_PREVIEW_PATHS)),
     )
