@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 const LINKS = [
   {
@@ -69,6 +70,20 @@ export function Nav() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
+  // The panel's own md:hidden only hides it visually -- the shared Sheet's
+  // backdrop (used full-time by the History sheet on desktop too) doesn't
+  // have that guard, so resizing past the md breakpoint while this is open
+  // would otherwise leave a dangling full-screen backdrop with no visible
+  // panel to dismiss it.
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 768px)");
+    const handleChange = () => {
+      if (mql.matches) setOpen(false);
+    };
+    mql.addEventListener("change", handleChange);
+    return () => mql.removeEventListener("change", handleChange);
+  }, []);
+
   return (
     <>
       {/* Mobile top bar */}
@@ -94,17 +109,11 @@ export function Nav() {
       </header>
 
       {/* Mobile dropdown panel */}
-      {open && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-[#05080b]/70 md:hidden"
-            onClick={() => setOpen(false)}
-          />
-          <div className="fixed inset-x-0 top-14 z-50 flex flex-col gap-1 border-b border-app-border bg-app-sidebar p-3 md:hidden">
-            <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
-          </div>
-        </>
-      )}
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent side="top" className="top-14 gap-1 border-t-0 bg-app-sidebar p-3 md:hidden">
+          <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
+        </SheetContent>
+      </Sheet>
 
       {/* Desktop sidebar */}
       <aside className="hidden w-[200px] flex-shrink-0 flex-col border-r border-app-border bg-app-sidebar md:flex">

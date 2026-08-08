@@ -10,6 +10,11 @@ import {
   type Provider,
 } from "@/lib/api";
 import { HistorySessionModal } from "@/components/HistorySessionModal";
+import { PROVIDER_LABEL, ProviderSelect } from "@/components/ProviderSelect";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const PAGE_SIZE = 20;
 // The backend commits the sessions row before generating previews, so a session with
@@ -23,22 +28,13 @@ function isLikelyGenerating(session: HistorySessionItem): boolean {
   return Date.now() - new Date(session.created_at).getTime() < GENERATING_THRESHOLD_MS;
 }
 
-const PROVIDER_LABEL: Record<HistorySessionItem["provider"], string> = {
-  local: "Local",
-  gemini: "Gemini",
-  openai: "OpenAI",
-  stability: "Stability AI",
-};
-
 function SessionMeta({ item }: { item: HistorySessionItem }) {
   return (
     <div className="flex flex-col gap-1">
       <p className="truncate text-sm text-ink-secondary">{item.original_prompt}</p>
       <div className="flex items-center justify-between gap-2">
         <p className="font-mono text-xs text-ink-faint">{new Date(item.created_at).toLocaleString()}</p>
-        <span className="rounded-full border border-app-border px-1.5 py-0.5 text-[10px] text-ink-muted">
-          {PROVIDER_LABEL[item.provider]}
-        </span>
+        <Badge size="sm">{PROVIDER_LABEL[item.provider]}</Badge>
       </div>
     </div>
   );
@@ -214,30 +210,25 @@ export function HistoryGallery() {
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.3-4.3" />
             </svg>
-            <input
-              placeholder="Search prompts"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full border-none bg-transparent text-sm text-ink-secondary outline-none placeholder:text-ink-muted"
-            />
+            <Input placeholder="Search prompts" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
-          <button
-            type="button"
-            onClick={toggleSort}
-            title={sort === "newest" ? "Sorted newest first" : "Sorted oldest first"}
-            className="flex items-center gap-1 rounded-md border border-app-border px-3 py-2 text-sm text-ink-secondary transition hover:bg-app-surfaceAlt"
-          >
-            {sort === "newest" ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M6 12h12M10 18h4" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 6H3M18 12H6M14 18h-4" />
-              </svg>
-            )}
-            {sort === "newest" ? "Newest" : "Oldest"}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" onClick={toggleSort} className="gap-1 px-3 py-2">
+                {sort === "newest" ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 6h18M6 12h12M10 18h4" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 6H3M18 12H6M14 18h-4" />
+                  </svg>
+                )}
+                {sort === "newest" ? "Newest" : "Oldest"}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{sort === "newest" ? "Sorted newest first" : "Sorted oldest first"}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -291,45 +282,26 @@ export function HistoryGallery() {
                         Generation failed
                       </div>
                       <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
-                        <div className="relative flex items-center">
-                          <select
-                            value={regenerateProvider}
-                            disabled={isRegenerating}
-                            title={`Provider: ${PROVIDER_LABEL[regenerateProvider]}`}
-                            onChange={(e) =>
-                              setRegenerateProviderBySession((prev) => ({
-                                ...prev,
-                                [item.session_id]: e.target.value as Provider,
-                              }))
-                            }
-                            className="cursor-pointer appearance-none rounded-md border border-app-border bg-[#0a0e12]/75 py-1.5 pl-2.5 pr-6 text-xs text-ink-secondary backdrop-blur-sm outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {(Object.keys(PROVIDER_LABEL) as Provider[]).map((prov) => (
-                              <option key={prov} value={prov}>
-                                {PROVIDER_LABEL[prov]}
-                              </option>
-                            ))}
-                          </select>
-                          <svg
-                            width="9"
-                            height="9"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="3"
-                            className="pointer-events-none absolute right-2 text-ink-muted"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-                        </div>
-                        <button
-                          type="button"
+                        <ProviderSelect
+                          value={regenerateProvider}
+                          disabled={isRegenerating}
+                          title={`Provider: ${PROVIDER_LABEL[regenerateProvider]}`}
+                          onChange={(prov) =>
+                            setRegenerateProviderBySession((prev) => ({
+                              ...prev,
+                              [item.session_id]: prov,
+                            }))
+                          }
+                          triggerClassName="bg-[#0a0e12]/75 px-2.5 py-1.5 text-xs backdrop-blur-sm"
+                        />
+                        <Button
+                          variant="subtle"
+                          size="sm"
                           onClick={() => handleRegenerate(item)}
                           disabled={isRegenerating}
-                          className="rounded-md border border-app-border bg-[#0a0e12]/75 px-3.5 py-1.5 text-xs text-ink-secondary backdrop-blur-sm transition hover:bg-app-surfaceAlt disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {isRegenerating ? "Regenerating…" : "Regenerate"}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                     <SessionMeta item={item} />
@@ -360,14 +332,14 @@ export function HistoryGallery() {
         ) : null}
 
         {initialLoadDone && hasMore && !query && (
-          <button
-            type="button"
+          <Button
+            variant="outline"
             onClick={loadMore}
             disabled={loading}
-            className="self-center rounded-md border border-app-border px-7 py-3 text-sm text-ink-secondary transition hover:bg-app-surfaceAlt disabled:cursor-not-allowed disabled:opacity-50"
+            className="self-center px-7 py-3"
           >
             {loading ? "Loading…" : "Load more"}
-          </button>
+          </Button>
         )}
       </div>
 

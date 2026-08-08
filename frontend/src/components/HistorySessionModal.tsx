@@ -9,14 +9,11 @@ import {
   type Provider,
 } from "@/lib/api";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
+import { PROVIDER_LABEL, ProviderSelect } from "@/components/ProviderSelect";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
-
-const PROVIDER_LABEL: Record<Provider, string> = {
-  local: "Local",
-  gemini: "Gemini",
-  openai: "OpenAI",
-  stability: "Stability AI",
-};
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type Props = {
   session: HistorySessionItem;
@@ -75,23 +72,23 @@ export function HistorySessionModal({ session, onClose, onFinalized }: Props) {
           <div>
             <div className="flex items-center gap-2">
               <p className="text-sm text-ink-secondary">{session.original_prompt}</p>
-              <button
-                type="button"
-                onClick={handleCopyPrompt}
-                title={copied ? "Copied" : "Copy prompt"}
-                className="flex items-center border-none bg-transparent p-1 text-ink-muted transition hover:text-ink-secondary"
-              >
-                {copied ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect width="14" height="14" x="8" y="8" rx="2" />
-                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                  </svg>
-                )}
-              </button>
+              <Tooltip open={copied || undefined}>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={handleCopyPrompt} className="h-6 w-6">
+                    {copied ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect width="14" height="14" x="8" y="8" rx="2" />
+                        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                      </svg>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{copied ? "Copied" : "Copy prompt"}</TooltipContent>
+              </Tooltip>
             </div>
             <p className="mt-1.5 text-[11px] text-ink-muted">
               {new Date(session.created_at).toLocaleString()}
@@ -131,14 +128,18 @@ export function HistorySessionModal({ session, onClose, onFinalized }: Props) {
                   >
                     {image}
                     {p.final_provider && (
-                      <span className="absolute top-2.5 left-2.5 rounded-md bg-accent px-2.5 py-0.5 font-mono text-[10px] font-semibold text-accent-on">
+                      <Badge variant="accent" size="sm" className="absolute top-2.5 left-2.5">
                         {PROVIDER_LABEL[p.final_provider]}
-                      </span>
+                      </Badge>
                     )}
                     <a
                       href={downloadUrl(p.final_image_path!)}
                       onClick={(e) => e.stopPropagation()}
-                      className="absolute top-2.5 right-2.5 rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-accent-on"
+                      className={buttonVariants({
+                        variant: "accent",
+                        size: "sm",
+                        className: "absolute top-2.5 right-2.5",
+                      })}
                     >
                       Download 4K
                     </a>
@@ -157,45 +158,23 @@ export function HistorySessionModal({ session, onClose, onFinalized }: Props) {
                   {image}
                   {isSelectable && (
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
-                      <div className="relative flex items-center">
-                        <select
-                          value={selectedProvider}
-                          disabled={finalizing}
-                          title={`Provider: ${PROVIDER_LABEL[selectedProvider]}`}
-                          onChange={(e) =>
-                            setProviderByPreview((prev) => ({
-                              ...prev,
-                              [p.preview_id]: e.target.value as Provider,
-                            }))
-                          }
-                          className="cursor-pointer appearance-none rounded-md border border-app-border bg-[#0a0e12]/75 py-1.5 pl-2.5 pr-6 text-xs text-ink-secondary backdrop-blur-sm outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {(Object.keys(PROVIDER_LABEL) as Provider[]).map((prov) => (
-                            <option key={prov} value={prov}>
-                              {PROVIDER_LABEL[prov]}
-                            </option>
-                          ))}
-                        </select>
-                        <svg
-                          width="9"
-                          height="9"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                          className="pointer-events-none absolute right-2 text-ink-muted"
-                        >
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
-                      </div>
-                      <button
-                        type="button"
-                        className="rounded-md border border-app-border bg-[#0a0e12]/75 px-3.5 py-1.5 text-xs text-ink-secondary backdrop-blur-sm transition hover:bg-app-surfaceAlt disabled:cursor-not-allowed disabled:opacity-50"
+                      <ProviderSelect
+                        value={selectedProvider}
+                        disabled={finalizing}
+                        title={`Provider: ${PROVIDER_LABEL[selectedProvider]}`}
+                        onChange={(prov) =>
+                          setProviderByPreview((prev) => ({ ...prev, [p.preview_id]: prov }))
+                        }
+                        triggerClassName="bg-[#0a0e12]/75 px-2.5 py-1.5 text-xs backdrop-blur-sm"
+                      />
+                      <Button
+                        variant="subtle"
+                        size="sm"
                         disabled={finalizing}
                         onClick={() => handleSelectPreview(p.preview_id)}
                       >
                         Generate 4K
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>

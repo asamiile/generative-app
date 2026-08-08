@@ -58,6 +58,24 @@ curl -s -X POST http://localhost:8000/api/generate/preview \
   -d '{"prompt": "a quiet hot spring inn surrounded by mountains"}'
 ```
 
+### OpenAI API setup
+
+1. Issue an API key at the [OpenAI platform](https://platform.openai.com/api-keys) and set a [usage limit](https://platform.openai.com/settings/organization/limits) — the image endpoints are paid, no free tier.
+2. Set `OPENAI_API_KEY` in `backend/.env`.
+3. Model names change fast — verify `OPENAI_TEXT_MODEL` against [platform.openai.com/docs/models](https://platform.openai.com/docs/models) and `OPENAI_IMAGE_MODEL` against [the image generation guide](https://platform.openai.com/docs/guides/image-generation) before relying on the defaults in `backend/.env.example`.
+4. Restart the backend so it picks up the key: `docker compose up -d backend` (`restart` alone does **not** reload `.env`).
+
+Unlike Gemini/Local (4 separate calls), the Images API's `n` parameter generates all 4 previews in a single request. Finalize uses the edits endpoint (`/v1/images/edits`) with the selected preview as a reference image.
+
+### Stability AI API setup
+
+1. Issue an API key at [platform.stability.ai/account/keys](https://platform.stability.ai/account/keys).
+2. Set `STABILITY_API_KEY` in `backend/.env`.
+3. Stability has no general-purpose text/chat API, so prompt expansion is delegated to another provider — set via `STABILITY_TEXT_PROVIDER` (`gemini` | `local` | `openai`, default `local`/Ollama, so no extra cloud API key is needed by default — this does mean the [Local provider setup](#local-provider-setup-ollama--comfyui-optional) must be done first). Change it to `gemini` or `openai` if you'd rather use one of those for the expansion step instead.
+4. Restart the backend: `docker compose up -d backend`.
+
+Previews use Stable Image Core (cheap, ~$0.03/image); finalize uses the SD3 endpoint's image-to-image mode (`STABILITY_FINAL_STRENGTH`, default 0.35, controls how much the reference composition is preserved). **Known limitation**: Stability's exact parameter names for this endpoint weren't confirmable against their docs at the time this was written — if finalize fails, check `backend/providers/stability.py`'s module docstring and [platform.stability.ai/docs/api-reference](https://platform.stability.ai/docs/api-reference) directly.
+
 ### Local provider setup (Ollama + ComfyUI, optional)
 
 The Gemini provider works out of the box. The `local` provider (offline, no per-request cost) needs one-time setup after `docker compose up --build`:
@@ -97,24 +115,6 @@ Bottom line: local 4K needs **24GB+ Docker memory** just to run reliably, and ev
 The default sampling params (`COMFYUI_STEPS=8`, `COMFYUI_CFG=1.5`, etc.) assume a turbo/lightning-distilled SDXL checkpoint; using a standard (non-distilled) checkpoint like Juggernaut XL at these settings finishes faster but produces visibly noisy, undertrained-looking output — for that checkpoint, raise `COMFYUI_STEPS` to ~25-30 and `COMFYUI_CFG` to ~5-7 (slower still) or switch to an actual turbo/lightning checkpoint (keeps these fast defaults, better quality).
 
 **Known limitation**: the ComfyUI workflows in `backend/comfyui_workflows/` may need further tuning (sampler, quality) as you try different checkpoints.
-
-### OpenAI API setup
-
-1. Issue an API key at the [OpenAI platform](https://platform.openai.com/api-keys) and set a [usage limit](https://platform.openai.com/settings/organization/limits) — the image endpoints are paid, no free tier.
-2. Set `OPENAI_API_KEY` in `backend/.env`.
-3. Model names change fast — verify `OPENAI_TEXT_MODEL` against [platform.openai.com/docs/models](https://platform.openai.com/docs/models) and `OPENAI_IMAGE_MODEL` against [the image generation guide](https://platform.openai.com/docs/guides/image-generation) before relying on the defaults in `backend/.env.example`.
-4. Restart the backend so it picks up the key: `docker compose up -d backend` (`restart` alone does **not** reload `.env`).
-
-Unlike Gemini/Local (4 separate calls), the Images API's `n` parameter generates all 4 previews in a single request. Finalize uses the edits endpoint (`/v1/images/edits`) with the selected preview as a reference image.
-
-### Stability AI API setup
-
-1. Issue an API key at [platform.stability.ai/account/keys](https://platform.stability.ai/account/keys).
-2. Set `STABILITY_API_KEY` in `backend/.env`.
-3. Stability has no general-purpose text/chat API, so prompt expansion is delegated to another provider — set via `STABILITY_TEXT_PROVIDER` (`gemini` | `local` | `openai`, default `local`/Ollama, so no extra cloud API key is needed by default — this does mean the [Local provider setup](#local-provider-setup-ollama--comfyui-optional) must be done first). Change it to `gemini` or `openai` if you'd rather use one of those for the expansion step instead.
-4. Restart the backend: `docker compose up -d backend`.
-
-Previews use Stable Image Core (cheap, ~$0.03/image); finalize uses the SD3 endpoint's image-to-image mode (`STABILITY_FINAL_STRENGTH`, default 0.35, controls how much the reference composition is preserved). **Known limitation**: Stability's exact parameter names for this endpoint weren't confirmable against their docs at the time this was written — if finalize fails, check `backend/providers/stability.py`'s module docstring and [platform.stability.ai/docs/api-reference](https://platform.stability.ai/docs/api-reference) directly.
 
 **Troubleshooting — permission errors on `ollama_models`/`comfyui_models`**:
 ```bash

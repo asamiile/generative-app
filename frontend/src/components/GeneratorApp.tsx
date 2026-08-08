@@ -10,15 +10,12 @@ import {
   type Provider,
 } from "@/lib/api";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
+import { PROVIDER_LABEL, ProviderSelect } from "@/components/ProviderSelect";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 type Phase = "idle" | "generating-preview" | "preview-ready" | "finalizing" | "done";
-
-const PROVIDER_LABEL: Record<Provider, string> = {
-  local: "Local",
-  gemini: "Gemini",
-  openai: "OpenAI",
-  stability: "Stability AI",
-};
 
 export function GeneratorApp() {
   const [prompt, setPrompt] = useState("");
@@ -79,8 +76,7 @@ export function GeneratorApp() {
 
       <section className="flex flex-col gap-5">
         <div className="rounded-md border border-app-border bg-app-surface px-5 py-4">
-          <textarea
-            className="w-full resize-none border-none bg-transparent text-base leading-relaxed tracking-tight text-ink-primary outline-none placeholder:text-ink-muted disabled:opacity-50"
+          <Textarea
             rows={3}
             maxLength={200}
             placeholder="e.g. Tokyo at night, a crosswalk just after the rain"
@@ -90,41 +86,17 @@ export function GeneratorApp() {
           />
         </div>
         <div className="flex items-center gap-4">
-          <button
-            type="button"
-            className="rounded-md bg-accent px-6 py-3 text-sm font-semibold tracking-tight text-accent-on transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={handleGeneratePreview}
-            disabled={isBusy || !prompt.trim()}
-          >
+          <Button variant="accent" onClick={handleGeneratePreview} disabled={isBusy || !prompt.trim()}>
             {phase === "generating-preview" ? "Generating previews…" : "Generate previews"}
-          </button>
+          </Button>
           <div className="flex items-center gap-2 rounded-md border border-app-border bg-app-surface py-0 pl-3.5 pr-1">
             <span className="font-mono text-xs text-ink-muted">Model</span>
-            <div className="relative flex items-center">
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value as Provider)}
-                disabled={isBusy}
-                className="cursor-pointer appearance-none bg-transparent py-2.5 pl-1 pr-6 text-sm text-ink-secondary outline-none disabled:cursor-not-allowed"
-              >
-                {(Object.keys(PROVIDER_LABEL) as Provider[]).map((p) => (
-                  <option key={p} value={p}>
-                    {PROVIDER_LABEL[p]}
-                  </option>
-                ))}
-              </select>
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                className="pointer-events-none absolute right-1.5 text-ink-muted"
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </div>
+            <ProviderSelect
+              value={provider}
+              onChange={setProvider}
+              disabled={isBusy}
+              triggerClassName="border-none py-2.5 pl-1 pr-1"
+            />
           </div>
         </div>
         {phase === "generating-preview" && <ProgressIndicator label="Generating 4 previews" />}
@@ -136,29 +108,16 @@ export function GeneratorApp() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-semibold text-ink-primary">Choose a preview</h2>
-              <span className="rounded-full border border-app-border px-2 py-0.5 text-xs text-ink-muted">
-                {PROVIDER_LABEL[preview.provider]}
-              </span>
+              <Badge>{PROVIDER_LABEL[preview.provider]}</Badge>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-ink-muted">4K with</span>
-              <div className="flex items-center gap-1 rounded-md border border-app-border p-1">
-                {(Object.keys(PROVIDER_LABEL) as Provider[]).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className={`rounded px-2.5 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                      finalizeProvider === p
-                        ? "bg-ink-primary text-app-bg"
-                        : "text-ink-secondary hover:bg-app-surfaceAlt"
-                    }`}
-                    onClick={() => setFinalizeProvider(p)}
-                    disabled={isBusy}
-                  >
-                    {PROVIDER_LABEL[p]}
-                  </button>
-                ))}
-              </div>
+              <ProviderSelect
+                value={finalizeProvider}
+                onChange={setFinalizeProvider}
+                disabled={isBusy}
+                triggerClassName="bg-app-surface px-2.5 py-1.5 text-xs"
+              />
             </div>
           </div>
           <div className="grid grid-cols-4 gap-4">
@@ -196,16 +155,9 @@ export function GeneratorApp() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-semibold text-ink-primary">Rendered Image</h2>
-              {finalProvider && (
-                <span className="rounded-full border border-app-border px-2 py-0.5 text-xs text-ink-muted">
-                  {PROVIDER_LABEL[finalProvider]}
-                </span>
-              )}
+              {finalProvider && <Badge>{PROVIDER_LABEL[finalProvider]}</Badge>}
             </div>
-            <a
-              href={downloadUrl(finalImagePath)}
-              className="flex items-center gap-2 rounded-md border border-app-border px-4 py-2 text-sm text-ink-secondary transition hover:bg-app-surfaceAlt"
-            >
+            <a href={downloadUrl(finalImagePath)} className={buttonVariants({ variant: "outline", className: "px-4 py-2" })}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="7 10 12 15 17 10" />
