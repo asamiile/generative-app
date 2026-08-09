@@ -95,6 +95,12 @@ async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
     return await asyncio.gather(*tasks)
 
 
+async def generate_one_preview(enhanced_prompt: str) -> str | None:
+    """Public single-image entry point (used by the individual-retry endpoint)."""
+    client = _get_http_client()
+    return await _generate_one_preview(client, enhanced_prompt)
+
+
 async def generate_final_image(enhanced_prompt: str, reference_image_path: str) -> str | None:
     client = _get_http_client()
     reference_path = BACKEND_ROOT / reference_image_path.lstrip("/")

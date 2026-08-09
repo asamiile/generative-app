@@ -244,6 +244,16 @@ async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
     return [await _generate_one_preview(client, enhanced_prompt) for _ in range(PREVIEW_COUNT)]
 
 
+async def generate_one_preview(enhanced_prompt: str) -> str | None:
+    """Public single-image entry point (used by the individual-retry endpoint).
+    Fetches its own client rather than taking one as a param, matching the other
+    three providers' public interface -- the internal _generate_one_preview above
+    keeps the client param so generate_preview_batch's sequential loop can reuse
+    one client across all 4 jobs instead of opening a new one per call."""
+    client = _get_http_client()
+    return await _generate_one_preview(client, enhanced_prompt)
+
+
 async def generate_final_image(enhanced_prompt: str, reference_image_path: str) -> str | None:
     client = _get_http_client()
     reference_path = BACKEND_ROOT / reference_image_path.lstrip("/")

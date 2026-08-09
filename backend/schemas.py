@@ -18,6 +18,10 @@ class PreviewImageOut(BaseModel):
     candidate_index: int
     image_path: str | None
     status: GenerationStatus
+    # Provider that generated the current image_path/status. Initially the
+    # session's provider; overwritten on individual retry, which can target a
+    # different provider than the rest of the session.
+    provider: ProviderType
     # The result of finalizing this preview to 4K. Each preview holds its own independently.
     final_image_path: str | None = None
     final_status: GenerationStatus | None = None
@@ -37,9 +41,18 @@ class GeneratePreviewResponse(BaseModel):
 class FinalizeRequest(BaseModel):
     session_id: int
     preview_id: int
-    # Falls back to the session's provider when omitted -- may differ from it (e.g.
-    # previewed locally, finalized with Gemini because local finalize is slow at
-    # high resolution).
+    # Falls back to this preview's own (current) provider when omitted -- may
+    # differ from the session's provider once individual retry is in play (e.g.
+    # previewed with Gemini, retried with Local, finalized with Gemini again
+    # because local finalize is slow at high resolution).
+    provider: ProviderType | None = None
+
+
+class RetryPreviewRequest(BaseModel):
+    session_id: int
+    preview_id: int
+    # Falls back to this preview's own (current) provider when omitted -- i.e. a
+    # plain "try again" with the same provider unless a different one is chosen.
     provider: ProviderType | None = None
 
 

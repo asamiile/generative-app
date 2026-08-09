@@ -9,6 +9,11 @@ export type PreviewImage = {
   candidate_index: number;
   image_path: string | null;
   status: GenerationStatus;
+  // Provider that generated the current image_path/status. Overwritten on
+  // individual retry, which can target a different provider than the rest of
+  // the session -- this is what a retry's own default provider follows, not
+  // the session's.
+  provider: Provider;
   // The result of finalizing this preview to 4K. Each preview holds its own independently.
   final_image_path: string | null;
   final_status: GenerationStatus | null;
@@ -68,6 +73,17 @@ export function generateFinalize(
   provider?: Provider,
 ): Promise<FinalizeResponse> {
   return apiFetch<FinalizeResponse>("/api/generate/finalize", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId, preview_id: previewId, provider }),
+  });
+}
+
+export function retryPreview(
+  sessionId: number,
+  previewId: number,
+  provider?: Provider,
+): Promise<PreviewImage> {
+  return apiFetch<PreviewImage>("/api/generate/preview/retry", {
     method: "POST",
     body: JSON.stringify({ session_id: sessionId, preview_id: previewId, provider }),
   });

@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import {
-  generatePreview,
   getHistory,
   resolveImageUrl,
+  retryPreview,
   type HistorySessionItem,
   type HistorySort,
+  type PreviewImage,
   type Provider,
 } from "@/lib/api";
 import { HistorySessionModal } from "@/components/HistorySessionModal";
@@ -31,28 +32,36 @@ function isLikelyGenerating(session: HistorySessionItem): boolean {
   return Date.now() - new Date(session.created_at).getTime() < GENERATING_THRESHOLD_MS;
 }
 
-function SessionMeta({ item }: { item: HistorySessionItem }) {
+function SessionMeta({ item, provider }: { item: HistorySessionItem; provider: Provider | null }) {
   return (
     <div className="flex flex-col gap-1">
       <p className="truncate text-sm text-ink-secondary">{item.original_prompt}</p>
       <div className="flex items-center justify-between gap-2">
         <p className="font-mono text-xs text-ink-faint">{new Date(item.created_at).toLocaleString()}</p>
-        <Badge size="sm">{PROVIDER_LABEL[item.provider]}</Badge>
+        {provider && <Badge size="sm">{PROVIDER_LABEL[provider]}</Badge>}
       </div>
     </div>
   );
 }
 
-function thumbnailPath(session: HistorySessionItem): string | null {
+type Thumbnail = { url: string; provider: Provider };
+
+// The thumbnail image and its badge always agree on which provider actually made
+// them -- individual retry (POST /api/generate/preview/retry) means the 4
+// previews in one session can have different providers, so there's no single
+// "session provider" to show here anymore, only "whichever provider made THIS
+// specific thumbnail".
+function pickThumbnail(session: HistorySessionItem): Thumbnail | null {
   // If multiple previews have been finalized to 4K, use the most recently finalized one as the thumbnail.
   // The grid always displays it square (object-cover), matching the design regardless
   // of the underlying image's own aspect ratio.
   const finalized = session.previews.filter((p) => p.final_status === "success" && p.final_image_path);
   if (finalized.length > 0) {
     const latest = finalized.reduce((a, b) => ((b.finalized_at ?? "") > (a.finalized_at ?? "") ? b : a));
-    return latest.final_image_path;
+    return { url: latest.final_image_path!, provider: latest.final_provider ?? latest.provider };
   }
-  return session.previews.find((p) => p.status === "success" && p.image_path)?.image_path ?? null;
+  const preview = session.previews.find((p) => p.status === "success" && p.image_path);
+  return preview ? { url: preview.image_path!, provider: preview.provider } : null;
 }
 
 export function HistoryGallery() {
@@ -142,27 +151,40 @@ export function HistoryGallery() {
   const handleRegenerate = async (item: HistorySessionItem) => {
     setRegeneratingSessionIds((prev) => new Set(prev).add(item.session_id));
     setError(null);
-    try {
-      const result = await generatePreview(item.original_prompt, getRegenerateProvider(item));
-      const newItem: HistorySessionItem = {
-        session_id: result.session_id,
-        original_prompt: item.original_prompt,
-        enhanced_prompt: result.enhanced_prompt,
-        provider: result.provider,
-        created_at: new Date().toISOString(),
-        previews: result.previews,
-      };
-      // Regenerate creates a new session, so add it to the front/back per the current sort order.
-      setItems((prev) => (sort === "newest" ? [newItem, ...prev] : [...prev, newItem]));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to regenerate previews");
-    } finally {
-      setRegeneratingSessionIds((prev) => {
-        const next = new Set(prev);
-        next.delete(item.session_id);
-        return next;
-      });
+    const chosenProvider = getRegenerateProvider(item);
+    // Overwrites this session's existing 4 preview_images rows in place (same
+    // endpoint individual "Retry" uses, called once per candidate) rather than
+    // creating a brand-new session -- there's no use for this app in keeping a
+    // fully-failed session sitting in history once it's been regenerated, same
+    // reasoning as individual retry overwriting instead of appending. Reuses the
+    // session's existing enhanced_prompt rather than re-expanding it, matching
+    // individual retry's behavior.
+    const results = await Promise.allSettled(
+      item.previews.map((p) => retryPreview(item.session_id, p.preview_id, chosenProvider)),
+    );
+    const failureCount = results.filter((r) => r.status === "rejected").length;
+    if (failureCount > 0) {
+      // Some candidates may still have succeeded -- don't discard those (see
+      // setItems below), just surface that not all 4 made it.
+      setError(`Failed to regenerate ${failureCount} of ${results.length} previews`);
     }
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.session_id !== item.session_id) return it;
+        return {
+          ...it,
+          previews: it.previews.map((p, i) => {
+            const result = results[i];
+            return result.status === "fulfilled" ? result.value : p;
+          }),
+        };
+      }),
+    );
+    setRegeneratingSessionIds((prev) => {
+      const next = new Set(prev);
+      next.delete(item.session_id);
+      return next;
+    });
   };
 
   const handleFinalized = (
@@ -193,6 +215,21 @@ export function HistoryGallery() {
       ),
     );
     // Don't close the modal: lets the user keep finalizing other previews in the same session.
+  };
+
+  const handleRetried = (sessionId: number, previewId: number, updated: PreviewImage) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.session_id === sessionId
+          ? {
+              ...item,
+              previews: item.previews.map((p) => (p.preview_id === previewId ? updated : p)),
+            }
+          : item,
+      ),
+    );
+    // Don't close the modal: matches handleFinalized -- lets the user keep working
+    // on other previews in the same session.
   };
 
   const openSession = items.find((item) => item.session_id === openSessionId) ?? null;
@@ -249,7 +286,7 @@ export function HistoryGallery() {
         ) : initialLoadDone ? (
           <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4">
             {items.map((item) => {
-              const thumbnail = thumbnailPath(item);
+              const thumbnail = pickThumbnail(item);
               const isRegenerating = regeneratingSessionIds.has(item.session_id);
 
               if (!thumbnail && isLikelyGenerating(item)) {
@@ -272,7 +309,7 @@ export function HistoryGallery() {
                       </svg>
                       <span className="text-xs">Generating…</span>
                     </div>
-                    <SessionMeta item={item} />
+                    <SessionMeta item={item} provider={null} />
                   </div>
                 );
               }
@@ -312,7 +349,7 @@ export function HistoryGallery() {
                         </Button>
                       </div>
                     </div>
-                    <SessionMeta item={item} />
+                    <SessionMeta item={item} provider={null} />
                   </div>
                 );
               }
@@ -327,12 +364,12 @@ export function HistoryGallery() {
                   <div className="aspect-square w-full overflow-hidden rounded-lg">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={resolveImageUrl(thumbnail)}
+                      src={resolveImageUrl(thumbnail.url)}
                       alt={item.original_prompt}
                       className="h-full w-full object-cover transition hover:opacity-80"
                     />
                   </div>
-                  <SessionMeta item={item} />
+                  <SessionMeta item={item} provider={thumbnail.provider} />
                 </button>
               );
             })}
@@ -356,6 +393,7 @@ export function HistoryGallery() {
           session={openSession}
           onClose={() => setOpenSessionId(null)}
           onFinalized={handleFinalized}
+          onRetried={handleRetried}
           availableProviders={availableProviders}
         />
       )}

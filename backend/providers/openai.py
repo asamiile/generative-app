@@ -76,9 +76,7 @@ def _negative_prompt_suffix() -> str:
     return f"\nAvoid: {NEGATIVE_PROMPT}."
 
 
-async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
-    """Generate all 4 previews in a single call: unlike Gemini, the Images API
-    supports n>1 (multiple candidates per request) natively."""
+async def _generate_previews(enhanced_prompt: str, n: int) -> list[str | None]:
     client = _get_http_client()
     try:
         response = await request_with_retry(
@@ -87,26 +85,39 @@ async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
                 json={
                     "model": OPENAI_IMAGE_MODEL,
                     "prompt": enhanced_prompt + _negative_prompt_suffix(),
-                    "n": PREVIEW_COUNT,
+                    "n": n,
                     "size": OPENAI_PREVIEW_SIZE,
                 },
             )
         )
         response.raise_for_status()
     except httpx.HTTPError:
-        return [None] * PREVIEW_COUNT
+        return [None] * n
 
     items = response.json().get("data", [])
     paths: list[str | None] = []
-    for item in items[:PREVIEW_COUNT]:
+    for item in items[:n]:
         b64 = item.get("b64_json")
         if not b64:
             paths.append(None)
             continue
         paths.append(save_image_bytes(base64.b64decode(b64), "image/png"))
-    while len(paths) < PREVIEW_COUNT:
+    while len(paths) < n:
         paths.append(None)
     return paths
+
+
+async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
+    """Generate all 4 previews in a single call: unlike Gemini, the Images API
+    supports n>1 (multiple candidates per request) natively."""
+    return await _generate_previews(enhanced_prompt, PREVIEW_COUNT)
+
+
+async def generate_one_preview(enhanced_prompt: str) -> str | None:
+    """Public single-image entry point (used by the individual-retry endpoint) --
+    same /images/generations call as generate_preview_batch, just n=1."""
+    results = await _generate_previews(enhanced_prompt, 1)
+    return results[0] if results else None
 
 
 async def generate_final_image(enhanced_prompt: str, reference_image_path: str) -> str | None:
