@@ -76,3 +76,39 @@ def test_history_rejects_invalid_sort_value(client, auth_headers, monkeypatch):
     res = client.get("/api/history?sort=bogus", headers=auth_headers)
 
     assert res.status_code == 422
+
+
+def test_history_search_filters_by_prompt_substring(client, auth_headers, monkeypatch):
+    create_preview_session(client, auth_headers, monkeypatch, prompt="a quiet mountain inn")
+    create_preview_session(client, auth_headers, monkeypatch, prompt="a busy city street")
+
+    res = client.get("/api/history?q=mountain", headers=auth_headers)
+
+    prompts = [s["original_prompt"] for s in res.json()]
+    assert prompts == ["a quiet mountain inn"]
+
+
+def test_history_search_is_case_insensitive(client, auth_headers, monkeypatch):
+    create_preview_session(client, auth_headers, monkeypatch, prompt="Tokyo at Night")
+
+    res = client.get("/api/history?q=tokyo", headers=auth_headers)
+
+    assert len(res.json()) == 1
+
+
+def test_history_search_still_paginates_matches(client, auth_headers, monkeypatch):
+    # A regression check for the bug this replaces: search used to filter only the
+    # currently-loaded page client-side, so a match outside the first page was
+    # unreachable -- "Load more" was also hidden whenever a query was active.
+    create_preview_session(client, auth_headers, monkeypatch, prompt="mountain one")
+    create_preview_session(client, auth_headers, monkeypatch, prompt="mountain two")
+    create_preview_session(client, auth_headers, monkeypatch, prompt="unrelated")
+
+    res = client.get("/api/history?q=mountain&limit=1&offset=0", headers=auth_headers)
+    first_page = res.json()
+    assert len(first_page) == 1
+
+    res = client.get("/api/history?q=mountain&limit=1&offset=1", headers=auth_headers)
+    second_page = res.json()
+    assert len(second_page) == 1
+    assert second_page[0]["session_id"] != first_page[0]["session_id"]

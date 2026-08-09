@@ -24,13 +24,14 @@ Two tables: `sessions` (one row per prompt submission) and `preview_images` (fou
 | image_path | String(255), nullable | relative path to the 1K preview; NULL on failure |
 | status | Enum(`success`, `failed`) | preview generation result |
 | error_message | Text, nullable | |
+| provider | Enum(`gemini`, `local`, `openai`, `stability`), not nullable | provider that generated the *current* `image_path`/`status`. Initially copied from `sessions.provider` at creation; overwritten by `POST /api/generate/preview/retry`, which can retry with a different provider than the rest of the session. Unlike `final_provider` below, this is never NULL — every preview has a generating provider from the moment it's created |
 | created_at | DateTime (tz-aware, `server_default=func.now()`) | |
 | final_image_path | String(255), nullable | relative path to the 4K result; NULL until finalized |
 | final_status | Enum(`success`, `failed`), nullable | NULL until finalize is attempted |
 | final_error_message | Text, nullable | |
 | resolution | String(16), nullable | `"4K"` once finalized |
 | finalized_at | DateTime (tz-aware), nullable | |
-| final_provider | Enum(`gemini`, `local`, `openai`, `stability`), nullable | provider used for *this preview's* finalize attempt; NULL until finalize is attempted. Defaults to `sessions.provider` when the finalize request omits it, but can differ (e.g. preview generated locally, finalized with Gemini because local finalize is too slow/unreliable at high resolution) |
+| final_provider | Enum(`gemini`, `local`, `openai`, `stability`), nullable | provider used for *this preview's* finalize attempt; NULL until finalize is attempted. Defaults to this row's own `provider` when the finalize request omits it (not `sessions.provider` — see below), but can differ (e.g. preview generated locally, finalized with Gemini because local finalize is too slow/unreliable at high resolution). Cleared back to NULL if this preview is later retried (see `provider` above and `POST /api/generate/preview/retry` in [api.md](api.md)) |
 
 ## Migration policy
 
@@ -47,3 +48,5 @@ Two tables: `sessions` (one row per prompt submission) and `preview_images` (fou
 `preview_images.final_provider` was added in migration `0004_add_preview_final_provider.py` (nullable, no default needed since existing rows' finalize state is either NULL or already reflects their session's provider at the time). Introduced once local CPU-only finalize was confirmed impractical at high resolution (hours per image, see [overview.md](overview.md#providers)) — finalize needed to pick a different provider than the one that generated the preview, which `sessions.provider` alone couldn't express.
 
 `openai`/`stability` were added to `ProviderType` in migration `0005_add_openai_stability_providers.py`. Note this DB has no CHECK constraint enforcing the enum's allowed values on SQLite (confirmed by inspecting the schema — this SQLAlchemy version doesn't add one), so adding new Python enum members alone would already "work" at the DB layer; the migration instead widens the declared column type from `VARCHAR(6)` (auto-sized to fit `"gemini"`, the longest of the original two values) to fit `"stability"` (9 chars) — a schema-correctness fix, not a functional one, but matters if this ever runs against a backend that does enforce VARCHAR length.
+
+`preview_images.provider` was added in migration `0006_add_preview_provider.py` to support individual-preview retry (`POST /api/generate/preview/retry` in [api.md](api.md)): before this, only `sessions.provider` existed, which was accurate for the initial batch of 4 but went stale the instant any one preview was retried with a different provider. Added as nullable, backfilled from each row's `sessions.provider` via a correlated `UPDATE`, then altered to `NOT NULL` (`batch_alter_table`, required on SQLite for altering nullability, same as the `final_provider` type widen in `0005`) — the same nullable → backfill → NOT NULL sequence would apply to any future column that needs a value derived from existing data rather than one literal default.

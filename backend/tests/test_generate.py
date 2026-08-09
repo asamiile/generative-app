@@ -44,6 +44,23 @@ def test_generate_preview_rejects_missing_provider(client, auth_headers):
     assert res.status_code == 422
 
 
+def test_generate_preview_expand_prompt_failure_returns_clean_error(client, auth_headers, monkeypatch):
+    """None of the providers' expand_prompt catches its own errors -- main.py wraps
+    the call for every provider and turns any exception into a 502 instead of an
+    unhandled 500, and doesn't create a session row (nothing was generated yet)."""
+    monkeypatch.setattr(gemini, "expand_prompt", AsyncMock(side_effect=RuntimeError("boom")))
+
+    res = client.post(
+        "/api/generate/preview", json={"prompt": "a cat", "provider": "gemini"}, headers=auth_headers
+    )
+
+    assert res.status_code == 502
+    assert "boom" in res.json()["detail"]
+
+    history = client.get("/api/history", headers=auth_headers).json()
+    assert history == []
+
+
 def test_generate_preview_success(client, auth_headers, monkeypatch):
     body = create_preview_session(client, auth_headers, monkeypatch, prompt="a cat")
 
@@ -151,7 +168,11 @@ def test_generate_finalize_records_failure_status(client, auth_headers, monkeypa
     assert body["image_path"] is None
 
 
-def test_generate_finalize_defaults_to_session_provider(client, auth_headers, monkeypatch):
+def test_generate_finalize_defaults_to_the_preview_own_provider(client, auth_headers, monkeypatch):
+    """Falls back to preview.provider, not sessions.provider -- in the common case
+    (no retry) these are equal, so this alone doesn't distinguish which one it
+    actually reads. See test_generate_finalize_defaults_to_retried_provider_not_session_provider
+    below for the case where they differ."""
     preview_body = create_preview_session(client, auth_headers, monkeypatch)
     assert preview_body["provider"] == "gemini"
     preview_id = preview_body["previews"][0]["preview_id"]
@@ -167,6 +188,45 @@ def test_generate_finalize_defaults_to_session_provider(client, auth_headers, mo
 
     assert res.status_code == 200
     assert res.json()["provider"] == "gemini"
+
+
+def test_generate_finalize_defaults_to_retried_provider_not_session_provider(
+    client, auth_headers, monkeypatch
+):
+    """Regression test: finalize used to fall back to sessions.provider, which goes
+    stale the moment a preview is individually retried with a different provider.
+    Here the session is gemini, preview 0 is retried to local, and omitting
+    finalize's provider must follow the preview (local), not the session (gemini)."""
+    preview_body = create_preview_session(client, auth_headers, monkeypatch)
+    assert preview_body["provider"] == "gemini"
+    preview_id = preview_body["previews"][0]["preview_id"]
+
+    monkeypatch.setattr(
+        local, "generate_one_preview", AsyncMock(return_value="/static/images/retried.jpg")
+    )
+    retry_res = client.post(
+        "/api/generate/preview/retry",
+        json={
+            "session_id": preview_body["session_id"],
+            "preview_id": preview_id,
+            "provider": "local",
+        },
+        headers=auth_headers,
+    )
+    assert retry_res.status_code == 200
+    assert retry_res.json()["provider"] == "local"
+
+    monkeypatch.setattr(
+        local, "generate_final_image", AsyncMock(return_value="/static/images/final-local.jpg")
+    )
+    res = client.post(
+        "/api/generate/finalize",
+        json={"session_id": preview_body["session_id"], "preview_id": preview_id},
+        headers=auth_headers,
+    )
+
+    assert res.status_code == 200
+    assert res.json()["provider"] == "local"
 
 
 def test_generate_finalize_can_use_a_different_provider_than_the_session(

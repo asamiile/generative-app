@@ -28,6 +28,7 @@ from schemas import (
     GeneratePreviewResponse,
     HistorySessionItem,
     PreviewImageOut,
+    RetryPreviewRequest,
 )
 
 def _as_utc(dt: datetime) -> datetime:
@@ -109,7 +110,17 @@ async def generate_preview(
 ) -> GeneratePreviewResponse:
     provider = get_provider(body.provider.value)
 
-    enhanced_prompt = await provider.expand_prompt(body.prompt)
+    # Every provider's expand_prompt can raise (SDK error, httpx error, etc.) and
+    # none of them catch it themselves -- there's nothing to save yet at this point
+    # (no session row, no images attempted), so this is a clean 502 rather than
+    # trying to record a "failed" session with no enhanced_prompt to store.
+    try:
+        enhanced_prompt = await provider.expand_prompt(body.prompt)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to expand the prompt via {body.provider.value}: {exc}",
+        ) from exc
 
     # Commit here to release the write lock before the slow generation call. Flushing
     # without committing across a long external call would hold SQLite's write
@@ -134,6 +145,7 @@ async def generate_preview(
             image_path=image_path,
             status=GenerationStatus.SUCCESS if image_path else GenerationStatus.FAILED,
             error_message=None if image_path else "Failed to generate the preview image",
+            provider=body.provider,
         )
         db.add(preview)
         previews.append(preview)
@@ -152,6 +164,7 @@ async def generate_preview(
                 candidate_index=p.candidate_index,
                 image_path=p.image_path,
                 status=p.status,
+                provider=p.provider,
             )
             for p in previews
         ],
@@ -177,11 +190,12 @@ async def generate_finalize(
     if preview is None or preview.session_id != session.id or preview.image_path is None:
         raise HTTPException(status_code=400, detail="invalid preview_id for this session")
 
-    # Finalize defaults to the session's provider but can be overridden per preview
-    # (see .agents/docs/api.md) -- local CPU-only finalize can take hours at high
-    # resolution, so a session previewed locally may still want a fast/reliable
-    # cloud provider for the finalize step specifically.
-    provider_name = body.provider.value if body.provider else session.provider.value
+    # Falls back to this preview's OWN provider, not the session's: individual
+    # retry (see /api/generate/preview/retry below) can give a preview a different
+    # provider than the rest of the session, and finalize's default should follow
+    # whatever actually generated the image being finalized, not the session's
+    # original (possibly stale) provider.
+    provider_name = body.provider.value if body.provider else preview.provider.value
     provider = get_provider(provider_name)
     image_path = await provider.generate_final_image(session.enhanced_prompt, preview.image_path)
 
@@ -208,6 +222,68 @@ async def generate_finalize(
     )
 
 
+@app.post(
+    "/api/generate/preview/retry",
+    response_model=PreviewImageOut,
+    dependencies=[Depends(verify_token)],
+)
+@limiter.limit(f"{RATE_LIMIT_PER_HOUR}/hour")
+async def retry_preview(
+    request: Request,
+    body: RetryPreviewRequest,
+    db: DBSession = Depends(get_db),
+) -> PreviewImageOut:
+    """Regenerate a single preview candidate in place, optionally with a different
+    provider than the one that made it. Overwrites this preview_images row's
+    image_path/status/error_message/provider -- there's no value in keeping a
+    failed (or unwanted) attempt around once it's been retried, and the UI should
+    just reflect the latest attempt for this candidate_index. Does NOT touch the
+    other 3 previews or the session's own `provider`, which stays a record of what
+    the session started with."""
+    session = db.get(GenerationSession, body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    preview = db.get(PreviewImage, body.preview_id)
+    if preview is None or preview.session_id != session.id:
+        raise HTTPException(status_code=400, detail="invalid preview_id for this session")
+
+    provider_name = body.provider.value if body.provider else preview.provider.value
+    provider = get_provider(provider_name)
+    image_path = await provider.generate_one_preview(session.enhanced_prompt)
+
+    preview.image_path = image_path
+    preview.status = GenerationStatus.SUCCESS if image_path else GenerationStatus.FAILED
+    preview.error_message = None if image_path else "Failed to generate the preview image"
+    preview.provider = ProviderType(provider_name)
+    # Clear any existing finalize result: it was made FROM the old image_path as a
+    # reference, so it no longer corresponds to what this preview now shows. The
+    # UI currently only offers retry on failed previews (which can't have a
+    # finalize result yet), but this guards the API itself against that mismatch
+    # regardless of what the UI allows.
+    preview.final_image_path = None
+    preview.final_status = None
+    preview.final_error_message = None
+    preview.final_provider = None
+    preview.resolution = None
+    preview.finalized_at = None
+
+    db.commit()
+    db.refresh(preview)
+
+    return PreviewImageOut(
+        preview_id=preview.id,
+        candidate_index=preview.candidate_index,
+        image_path=preview.image_path,
+        status=preview.status,
+        provider=preview.provider,
+        final_image_path=preview.final_image_path,
+        final_status=preview.final_status,
+        final_provider=preview.final_provider,
+        finalized_at=_as_utc(preview.finalized_at) if preview.finalized_at else None,
+    )
+
+
 @app.get(
     "/api/history",
     response_model=list[HistorySessionItem],
@@ -217,6 +293,7 @@ def get_history(
     limit: int = 20,
     offset: int = 0,
     sort: Literal["newest", "oldest"] = "newest",
+    q: str | None = None,
     db: DBSession = Depends(get_db),
 ) -> list[HistorySessionItem]:
     # Group all 4 previews under their session regardless of finalize state, since
@@ -227,12 +304,13 @@ def get_history(
         order_by = (GenerationSession.created_at.asc(), GenerationSession.id.asc())
     else:
         order_by = (GenerationSession.created_at.desc(), GenerationSession.id.desc())
-    session_stmt = (
-        select(GenerationSession)
-        .order_by(*order_by)
-        .limit(limit)
-        .offset(offset)
-    )
+    session_stmt = select(GenerationSession)
+    # Server-side, not client-side over the currently-loaded page: filtering only
+    # what's already in the browser would silently miss matches on unloaded pages,
+    # with no way to page further in since "Load more" paginates the unfiltered set.
+    if q:
+        session_stmt = session_stmt.where(GenerationSession.original_prompt.ilike(f"%{q}%"))
+    session_stmt = session_stmt.order_by(*order_by).limit(limit).offset(offset)
     sessions = db.scalars(session_stmt).all()
 
     previews_by_session: dict[int, list[PreviewImage]] = {s.id: [] for s in sessions}
@@ -258,6 +336,7 @@ def get_history(
                     candidate_index=p.candidate_index,
                     image_path=p.image_path,
                     status=p.status,
+                    provider=p.provider,
                     final_image_path=p.final_image_path,
                     final_status=p.final_status,
                     final_provider=p.final_provider,

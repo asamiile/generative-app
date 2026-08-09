@@ -68,7 +68,7 @@ async def _generate_content_with_retry(**kwargs) -> types.GenerateContentRespons
     raise AssertionError("unreachable")
 
 
-async def _generate_one_preview(enhanced_prompt: str) -> str | None:
+async def generate_one_preview(enhanced_prompt: str) -> str | None:
     try:
         response = await _generate_content_with_retry(
             model=IMAGE_MODEL,
@@ -92,7 +92,7 @@ async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
     multiple candidates in one call), so individual requests are fanned out with
     asyncio.gather instead.
     """
-    tasks = [_generate_one_preview(enhanced_prompt) for _ in range(PREVIEW_COUNT)]
+    tasks = [generate_one_preview(enhanced_prompt) for _ in range(PREVIEW_COUNT)]
     return await asyncio.gather(*tasks)
 
 

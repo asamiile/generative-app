@@ -2,16 +2,14 @@
 
 import { useState } from "react";
 import {
-  downloadUrl,
   generateFinalize,
-  resolveImageUrl,
+  retryPreview,
   type HistorySessionItem,
+  type PreviewImage,
   type Provider,
 } from "@/lib/api";
-import { ProgressBar } from "@/components/ProgressIndicator";
-import { PROVIDER_LABEL, ProviderSelect } from "@/components/ProviderSelect";
-import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { PreviewTile } from "@/components/PreviewTile";
+import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -19,32 +17,54 @@ type Props = {
   session: HistorySessionItem;
   onClose: () => void;
   onFinalized: (sessionId: number, previewId: number, imagePath: string, provider: Provider) => void;
+  onRetried: (sessionId: number, previewId: number, updated: PreviewImage) => void;
   availableProviders: Provider[];
 };
 
-export function HistorySessionModal({ session, onClose, onFinalized, availableProviders }: Props) {
+export function HistorySessionModal({
+  session,
+  onClose,
+  onFinalized,
+  onRetried,
+  availableProviders,
+}: Props) {
   const [finalizingPreviewId, setFinalizingPreviewId] = useState<number | null>(null);
-  const finalizing = finalizingPreviewId !== null;
+  const [retryingPreviewId, setRetryingPreviewId] = useState<number | null>(null);
+  const busy = finalizingPreviewId !== null || retryingPreviewId !== null;
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  // Finalize provider is selectable per preview, independent of the session's
-  // (preview-generating) provider -- local CPU-only finalize can be too slow/
-  // unreliable at high resolution, so defaulting to the session's provider but
-  // letting it be overridden per image is the point. Chosen via a dropdown (not an
+  // Finalize provider is selectable per preview, independent of that preview's
+  // own (generating) provider -- local CPU-only finalize can be too slow/
+  // unreliable at high resolution, so defaulting to the preview's provider but
+  // letting it be overridden is the point. Chosen via a dropdown (not an
   // always-visible button row) so this scales as more providers are added.
-  const [providerByPreview, setProviderByPreview] = useState<Record<number, Provider>>({});
+  const [finalizeProviderByPreview, setFinalizeProviderByPreview] = useState<
+    Record<number, Provider>
+  >({});
+  const [retryProviderByPreview, setRetryProviderByPreview] = useState<Record<number, Provider>>(
+    {},
+  );
 
-  const getSelectedProvider = (previewId: number): Provider =>
-    providerByPreview[previewId] ?? session.provider;
+  const previewById = (previewId: number) =>
+    session.previews.find((p) => p.preview_id === previewId);
 
-  const handleSelectPreview = async (previewId: number) => {
+  // Falls back to the preview's OWN provider, not the session's -- individual
+  // retry can give a preview a different provider than the rest of the session,
+  // and the default here should follow whatever actually made this specific
+  // image, not the session's original (possibly stale) provider.
+  const getFinalizeProvider = (previewId: number): Provider =>
+    finalizeProviderByPreview[previewId] ?? previewById(previewId)?.provider ?? session.provider;
+  const getRetryProvider = (previewId: number): Provider =>
+    retryProviderByPreview[previewId] ?? previewById(previewId)?.provider ?? session.provider;
+
+  const handleFinalize = async (previewId: number) => {
     setError(null);
     setFinalizingPreviewId(previewId);
     try {
       const result = await generateFinalize(
         session.session_id,
         previewId,
-        getSelectedProvider(previewId),
+        getFinalizeProvider(previewId),
       );
       if (result.status !== "success" || !result.image_path) {
         throw new Error("Failed to generate the 4K image");
@@ -54,6 +74,19 @@ export function HistorySessionModal({ session, onClose, onFinalized, availablePr
       setError(err instanceof Error ? err.message : "Failed to generate the 4K image");
     } finally {
       setFinalizingPreviewId(null);
+    }
+  };
+
+  const handleRetry = async (previewId: number) => {
+    setError(null);
+    setRetryingPreviewId(previewId);
+    try {
+      const updated = await retryPreview(session.session_id, previewId, getRetryProvider(previewId));
+      onRetried(session.session_id, previewId, updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to retry the preview");
+    } finally {
+      setRetryingPreviewId(null);
     }
   };
 
@@ -103,90 +136,27 @@ export function HistorySessionModal({ session, onClose, onFinalized, availablePr
         <div className="flex flex-col gap-4">
           <h3 className="text-sm font-medium text-ink-secondary">Previews</h3>
           <div className="flex flex-col gap-3.5">
-            {session.previews.map((p) => {
-              // Each preview's finalize result is independent, so judge them one at a
-              // time (multiple previews in a session can each be finalized to 4K).
-              const isPreviewFinalized = p.final_status === "success" && !!p.final_image_path;
-              const image =
-                p.status === "success" && p.image_path ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={resolveImageUrl(p.image_path)}
-                    alt={`Preview candidate ${p.candidate_index + 1}`}
-                    className="h-full w-full object-cover transition group-hover:opacity-80"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs text-red-400">
-                    Generation failed
-                  </div>
-                );
-
-              if (isPreviewFinalized) {
-                return (
-                  <div
-                    key={p.preview_id}
-                    className="relative aspect-[16/10] overflow-hidden rounded-md border border-app-border"
-                  >
-                    {image}
-                    {p.final_provider && (
-                      <Badge variant="accent" size="sm" className="absolute top-2.5 left-2.5">
-                        {PROVIDER_LABEL[p.final_provider]}
-                      </Badge>
-                    )}
-                    <a
-                      href={downloadUrl(p.final_image_path!)}
-                      onClick={(e) => e.stopPropagation()}
-                      className={buttonVariants({
-                        variant: "accent",
-                        size: "sm",
-                        className: "absolute top-2.5 right-2.5",
-                      })}
-                    >
-                      Download 4K
-                    </a>
-                  </div>
-                );
-              }
-
-              const isSelectable = p.status === "success" && !!p.image_path;
-              const selectedProvider = getSelectedProvider(p.preview_id);
-
-              return (
-                <div
-                  key={p.preview_id}
-                  className="group relative aspect-[16/10] overflow-hidden rounded-md border border-app-border"
-                >
-                  {image}
-                  {isSelectable && (
-                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
-                      <ProviderSelect
-                        value={selectedProvider}
-                        disabled={finalizing}
-                        title={`Provider: ${PROVIDER_LABEL[selectedProvider]}`}
-                        options={availableProviders}
-                        onChange={(prov) =>
-                          setProviderByPreview((prev) => ({ ...prev, [p.preview_id]: prov }))
-                        }
-                        triggerClassName="bg-[#0a0e12]/75 px-2.5 py-1.5 text-xs backdrop-blur-sm"
-                      />
-                      <Button
-                        variant="subtle"
-                        size="sm"
-                        disabled={finalizing}
-                        onClick={() => handleSelectPreview(p.preview_id)}
-                      >
-                        Generate 4K
-                      </Button>
-                    </div>
-                  )}
-                  {finalizingPreviewId === p.preview_id && (
-                    <div className="absolute inset-x-0 top-0">
-                      <ProgressBar className="h-1 rounded-none" />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {session.previews.map((p) => (
+              <PreviewTile
+                key={p.preview_id}
+                preview={p}
+                availableProviders={availableProviders}
+                aspectClassName="aspect-[16/10]"
+                finalizeProvider={getFinalizeProvider(p.preview_id)}
+                onFinalizeProviderChange={(prov) =>
+                  setFinalizeProviderByPreview((prev) => ({ ...prev, [p.preview_id]: prov }))
+                }
+                onFinalize={() => handleFinalize(p.preview_id)}
+                isFinalizing={finalizingPreviewId === p.preview_id}
+                retryProvider={getRetryProvider(p.preview_id)}
+                onRetryProviderChange={(prov) =>
+                  setRetryProviderByPreview((prev) => ({ ...prev, [p.preview_id]: prov }))
+                }
+                onRetry={() => handleRetry(p.preview_id)}
+                isRetrying={retryingPreviewId === p.preview_id}
+                disabled={busy && finalizingPreviewId !== p.preview_id && retryingPreviewId !== p.preview_id}
+              />
+            ))}
           </div>
         </div>
       </SheetContent>

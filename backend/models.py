@@ -77,6 +77,12 @@ class PreviewImage(Base):
     image_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[GenerationStatus] = mapped_column(_status_enum(), nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provider that generated the current image_path/status -- initially the
+    # session's provider, but overwritten on individual retry (POST
+    # /api/generate/preview/retry), which can use a different provider than the
+    # rest of the session. Always set (unlike final_provider, which is NULL until
+    # finalize is attempted): every preview has a generating provider from creation.
+    provider: Mapped[ProviderType] = mapped_column(_provider_enum(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

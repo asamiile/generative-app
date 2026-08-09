@@ -1,23 +1,23 @@
 # Screen: History (`/history`)
 
-Components: [frontend/src/components/HistoryGallery.tsx](../../../frontend/src/components/HistoryGallery.tsx), [HistorySessionModal.tsx](../../../frontend/src/components/HistorySessionModal.tsx)
+Components: [frontend/src/components/HistoryGallery.tsx](../../../frontend/src/components/HistoryGallery.tsx), [HistorySessionModal.tsx](../../../frontend/src/components/HistorySessionModal.tsx), tiles inside the modal rendered via the shared [PreviewTile.tsx](../../../frontend/src/components/PreviewTile.tsx) (also used by [Generate](generate.md)).
 
 Lists every past session as a thumbnail grid, paginated via `GET /api/history`.
 
 ## Gallery (`HistoryGallery.tsx`)
 
-- Fetches page 1 on mount and whenever `sort` changes; `loadMore` appends subsequent pages (`PAGE_SIZE = 20`).
-- **Thumbnail selection** (`thumbnailPath`): if any preview in the session has been finalized to 4K, use the most recently finalized one (`finalized_at`); otherwise fall back to the first successful 1K preview.
-- **Failed sessions** (all 4 previews failed, so `thumbnailPath` returns `null`): rendered as a non-interactive card with "Generation failed" and a **Regenerate** button (top-right of the thumbnail). Regenerate calls `generatePreview(item.original_prompt)` to create a brand-new session and inserts it into the list (prepended if `sort === "newest"`, appended if `"oldest"`). Clicking the card itself does nothing — there's no image to show in the modal.
-- **Search**: client-side substring filter over `original_prompt` (`filteredItems`, no server round-trip).
+- Fetches page 1 on mount and whenever `sort` or the (debounced) search query changes; `loadMore` appends subsequent pages (`PAGE_SIZE = 20`).
+- **Thumbnail selection** (`pickThumbnail`): if any preview in the session has been finalized to 4K, use the most recently finalized one (`finalized_at`); otherwise fall back to the first successful 1K preview. Returns `{url, provider}` together, not just a path — the badge shown under the thumbnail is that specific image's own provider (`final_provider` if finalized, else that preview's `provider`), **not** a single session-wide provider. Individual retry (`POST /api/generate/preview/retry`) means the 4 previews in one session can genuinely have different providers, so there's no one value that would always be correct here.
+- **Failed sessions** (all 4 previews failed, so `pickThumbnail` returns `null`): rendered as a non-interactive card with "Generation failed" and a **Regenerate** button (top-right of the thumbnail). Regenerate is the whole-session counterpart to the modal's per-tile "Retry" (used when 1–3 candidates failed): it calls `retryPreview()` once per existing preview (4 calls, `Promise.allSettled`) rather than creating a brand-new session — same reasoning as individual retry, there's no use in this app for a fully-failed session lingering in history once it's been regenerated. A per-candidate failure among those 4 calls doesn't discard the others that succeeded (`results[i].status === "fulfilled"` gates which ones get applied), matching the failure-isolation pattern used throughout the generation backend. Clicking the card itself does nothing — there's no image to show in the modal until at least one candidate succeeds.
+  - Cost/rate-limit note: this makes 4 separate rate-limited requests (one per `retryPreview` call) rather than the 1 request `/api/generate/preview` used to make internally generating all 4 — same total provider cost (4 images either way), but it consumes 4 units of `RATE_LIMIT_PER_HOUR` instead of 1, and loses `openai`'s native single-call `n=4` batching (4 sequential HTTP round-trips instead of one). Accepted trade-off for reusing the existing retry endpoint instead of adding a dedicated regenerate-in-place one — Regenerate only fires when all 4 candidates failed, a rare case.
+- **Search**: server-side substring match on `original_prompt` (`GET /api/history?q=...`, case-insensitive `ilike`), debounced 300ms. Filters before pagination, so a match outside the already-loaded page(s) is still reachable via "Load more" — an earlier client-side-only filter missed those and hid "Load more" entirely while a query was active (fixed 2026-08-09, see [api.md](../api.md)).
 - **Sort**: `newest` | `oldest`, toggled by a button; refetches page 1 from the server (`GET /api/history?sort=...`) rather than re-sorting client-side.
-- Empty/loading states are gated on an `initialLoadDone` flag so "No history yet" and "Load more" never flash before the first fetch resolves.
+- Empty/loading states are gated on an `initialLoadDone` flag so "No history yet"/"No prompts match your search" and "Load more" never flash before the first fetch resolves.
 
 ## Session modal (`HistorySessionModal.tsx`)
 
-Opens when a non-failed card is clicked. Shows the original prompt (with a copy-to-clipboard button) and all 4 previews in a 2×2 grid.
+Opens when a non-failed card is clicked. Shows the original prompt (with a copy-to-clipboard button) and all 4 previews in a vertical list, each rendered as a `PreviewTile` (`aspect-[16/10]`) — same three-state tile logic as [Generate](generate.md#states) (finalized / successful-unfinalized-with-Generate-4K / failed-with-Retry), since a session's previews here can be in any mix of those states independently.
 
-- A preview with `final_status === "success"` shows a "Download 4K" badge (top-right) linking to the 4K file.
-- A preview without a finalized result is clickable and shows a "Generate 4K" badge; clicking calls `POST /api/generate/finalize` for that specific `preview_id`.
-- Multiple previews within the same session can each be finalized independently in one sitting — the modal does **not** auto-close after a successful finalize, so the user can finalize a second (or third, or fourth) preview right after.
-- `onFinalized` updates only the specific preview's `final_*` fields in the gallery's in-memory state (no full refetch).
+- `finalizeProviderByPreview`/`retryProviderByPreview` are per-preview `Record<previewId, Provider>` maps (not one session-wide value), each defaulting to that preview's own current `provider` (`getFinalizeProvider`/`getRetryProvider`) — see [api.md](../api.md#providers) for why the fallback is per-preview, not `sessions.provider`.
+- Multiple previews within the same session can each be finalized independently in one sitting, and a failed one can be retried independently too — the modal does **not** auto-close after a successful finalize or retry, so the user can keep working on the other 3.
+- `onFinalized` updates only the specific preview's `final_*` fields in the gallery's in-memory state; `onRetried` replaces the whole preview object (image_path/status/provider, and clears any stale `final_*` — see [api.md](../api.md)'s retry endpoint) — neither triggers a full refetch.

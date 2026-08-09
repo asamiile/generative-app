@@ -2,22 +2,22 @@
 
 import { useEffect, useState } from "react";
 import {
-  downloadUrl,
   generateFinalize,
   generatePreview,
   getHistory,
-  resolveImageUrl,
+  retryPreview,
   type GeneratePreviewResponse,
+  type PreviewImage,
   type Provider,
 } from "@/lib/api";
 import { LONG_TIMEOUT_MS } from "@/lib/timeouts";
-import { ProgressBar, ProgressIndicator } from "@/components/ProgressIndicator";
-import { PROVIDER_LABEL, ProviderSelect, useAvailableProviders } from "@/components/ProviderSelect";
-import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { ProgressIndicator } from "@/components/ProgressIndicator";
+import { PreviewTile } from "@/components/PreviewTile";
+import { ProviderSelect, useAvailableProviders } from "@/components/ProviderSelect";
+import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-type Phase = "idle" | "generating-preview" | "preview-ready" | "finalizing" | "done";
+type Phase = "idle" | "generating-preview" | "preview-ready" | "done";
 
 // Navigating away mid-generation (e.g. to History) and back used to lose all memory
 // of it -- the form looked idle again, so it was easy to accidentally kick off a
@@ -69,15 +69,24 @@ function clearPendingGeneration() {
 export function GeneratorApp() {
   const [prompt, setPrompt] = useState("");
   const [provider, setProvider] = useState<Provider>("local");
-  const [finalizeProvider, setFinalizeProvider] = useState<Provider>("local");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<GeneratePreviewResponse | null>(null);
-  const [finalImagePath, setFinalImagePath] = useState<string | null>(null);
-  const [finalProvider, setFinalProvider] = useState<Provider | null>(null);
+  // Which preview tile (if any) currently has a finalize/retry in flight, and
+  // which action -- each tile's own provider choice is tracked separately from
+  // the OTHER tiles', since individual retry means they can diverge (see
+  // PreviewTile / .agents/docs/screens/generate.md).
   const [finalizingPreviewId, setFinalizingPreviewId] = useState<number | null>(null);
+  const [retryingPreviewId, setRetryingPreviewId] = useState<number | null>(null);
+  const [finalizeProviderByPreview, setFinalizeProviderByPreview] = useState<
+    Record<number, Provider>
+  >({});
+  const [retryProviderByPreview, setRetryProviderByPreview] = useState<Record<number, Provider>>(
+    {},
+  );
 
-  const isBusy = phase === "generating-preview" || phase === "finalizing";
+  const isBusy = phase === "generating-preview";
+  const anyPreviewActionBusy = finalizingPreviewId !== null || retryingPreviewId !== null;
   const availableProviders = useAvailableProviders();
 
   // Runs once on mount: if we're landing here with a pending generation recorded
@@ -121,7 +130,6 @@ export function GeneratorApp() {
               provider: match.provider,
               previews: match.previews,
             });
-            setFinalizeProvider(match.provider);
             setPhase("preview-ready");
           }
           return;
@@ -147,18 +155,14 @@ export function GeneratorApp() {
     if (!prompt.trim()) return;
     setError(null);
     setPreview(null);
-    setFinalImagePath(null);
-    setFinalProvider(null);
+    setFinalizeProviderByPreview({});
+    setRetryProviderByPreview({});
     setPhase("generating-preview");
     writePendingGeneration({ prompt, provider, startedAt: Date.now() });
     try {
       const result = await generatePreview(prompt, provider);
       clearPendingGeneration();
       setPreview(result);
-      // Finalize defaults to whatever generated the previews, but stays independently
-      // selectable -- local CPU-only finalize can be too slow, so it's common to want
-      // a different provider for the finalize step specifically.
-      setFinalizeProvider(result.provider);
       setPhase("preview-ready");
     } catch (err) {
       clearPendingGeneration();
@@ -167,25 +171,79 @@ export function GeneratorApp() {
     }
   };
 
-  const handleSelectPreview = async (previewId: number) => {
+  const previewById = (previewId: number): PreviewImage | undefined =>
+    preview?.previews.find((p) => p.preview_id === previewId);
+
+  // Falls back to the preview's OWN provider, not the session's -- see
+  // .agents/docs/api.md's note on POST /api/generate/finalize's default.
+  const getFinalizeProvider = (previewId: number): Provider =>
+    finalizeProviderByPreview[previewId] ?? previewById(previewId)?.provider ?? provider;
+  const getRetryProvider = (previewId: number): Provider =>
+    retryProviderByPreview[previewId] ?? previewById(previewId)?.provider ?? provider;
+
+  const updatePreview = (previewId: number, updated: PreviewImage) => {
+    setPreview((prev) =>
+      prev
+        ? { ...prev, previews: prev.previews.map((p) => (p.preview_id === previewId ? updated : p)) }
+        : prev,
+    );
+  };
+
+  const handleFinalize = async (previewId: number) => {
     if (!preview) return;
     setError(null);
-    setPhase("finalizing");
     setFinalizingPreviewId(previewId);
     try {
-      const result = await generateFinalize(preview.session_id, previewId, finalizeProvider);
+      const result = await generateFinalize(
+        preview.session_id,
+        previewId,
+        getFinalizeProvider(previewId),
+      );
       if (result.status !== "success" || !result.image_path) {
         throw new Error("Failed to generate the 4K image");
       }
-      setFinalImagePath(result.image_path);
-      setFinalProvider(result.provider);
+      const current = previewById(previewId);
+      if (current) {
+        updatePreview(previewId, {
+          ...current,
+          final_image_path: result.image_path,
+          final_status: "success",
+          final_provider: result.provider,
+          finalized_at: new Date().toISOString(),
+        });
+      }
       setPhase("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate the 4K image");
-      setPhase("preview-ready");
     } finally {
       setFinalizingPreviewId(null);
     }
+  };
+
+  const handleRetry = async (previewId: number) => {
+    if (!preview) return;
+    setError(null);
+    setRetryingPreviewId(previewId);
+    try {
+      const updated = await retryPreview(preview.session_id, previewId, getRetryProvider(previewId));
+      updatePreview(previewId, updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to retry the preview");
+    } finally {
+      setRetryingPreviewId(null);
+    }
+  };
+
+  // Clears the generated previews only -- leaves the prompt textarea alone, so
+  // starting over with a tweaked version of the same prompt doesn't require
+  // retyping it. Without this, the only way to get rid of a set of previews you
+  // don't want to look at anymore was to generate a new set on top of them.
+  const handleClear = () => {
+    setError(null);
+    setPreview(null);
+    setFinalizeProviderByPreview({});
+    setRetryProviderByPreview({});
+    setPhase("idle");
   };
 
   return (
@@ -226,77 +284,43 @@ export function GeneratorApp() {
 
       {preview && (
         <section className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-ink-primary">Choose a preview</h2>
-              <Badge>{PROVIDER_LABEL[preview.provider]}</Badge>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-ink-muted">4K with</span>
-              <ProviderSelect
-                value={finalizeProvider}
-                onChange={setFinalizeProvider}
-                disabled={isBusy}
-                options={availableProviders}
-                triggerClassName="bg-app-surface px-2.5 py-1.5 text-xs"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-4 gap-4">
-            {preview.previews.map((p) => (
-              <button
-                key={p.preview_id}
-                type="button"
-                className="group relative aspect-square overflow-hidden rounded-md border border-app-border disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={p.status !== "success" || !p.image_path || isBusy}
-                onClick={() => handleSelectPreview(p.preview_id)}
-              >
-                {p.status === "success" && p.image_path ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={resolveImageUrl(p.image_path)}
-                    alt={`Preview candidate ${p.candidate_index + 1}`}
-                    className="h-full w-full object-cover transition group-hover:opacity-80"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs text-red-400">
-                    Generation failed
-                  </div>
-                )}
-                {finalizingPreviewId === p.preview_id && (
-                  <div className="absolute inset-x-0 top-0">
-                    <ProgressBar className="h-1 rounded-none" />
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {finalImagePath && (
-        <section className="flex flex-col gap-5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-ink-primary">Rendered Image</h2>
-              {finalProvider && <Badge>{PROVIDER_LABEL[finalProvider]}</Badge>}
-            </div>
-            <a href={downloadUrl(finalImagePath)} className={buttonVariants({ variant: "outline", className: "px-4 py-2" })}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              Download
-            </a>
+            <h2 className="text-lg font-semibold text-ink-primary">Choose a preview</h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClear}
+              disabled={anyPreviewActionBusy}
+            >
+              Clear
+            </Button>
           </div>
-          <div className="aspect-video w-full overflow-hidden rounded-md">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={resolveImageUrl(finalImagePath)}
-              alt="Final 4K image"
-              className="h-full w-full object-cover"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            {preview.previews.map((p) => (
+              <PreviewTile
+                key={p.preview_id}
+                preview={p}
+                availableProviders={availableProviders}
+                aspectClassName="aspect-[16/9]"
+                finalizeProvider={getFinalizeProvider(p.preview_id)}
+                onFinalizeProviderChange={(prov) =>
+                  setFinalizeProviderByPreview((prev) => ({ ...prev, [p.preview_id]: prov }))
+                }
+                onFinalize={() => handleFinalize(p.preview_id)}
+                isFinalizing={finalizingPreviewId === p.preview_id}
+                retryProvider={getRetryProvider(p.preview_id)}
+                onRetryProviderChange={(prov) =>
+                  setRetryProviderByPreview((prev) => ({ ...prev, [p.preview_id]: prov }))
+                }
+                onRetry={() => handleRetry(p.preview_id)}
+                isRetrying={retryingPreviewId === p.preview_id}
+                disabled={
+                  anyPreviewActionBusy &&
+                  finalizingPreviewId !== p.preview_id &&
+                  retryingPreviewId !== p.preview_id
+                }
+              />
+            ))}
           </div>
         </section>
       )}
