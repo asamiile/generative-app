@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   generatePreview,
   getHistory,
@@ -79,15 +79,24 @@ export function HistoryGallery() {
   // both conditions true for a moment before the fetch completes.
   const [initialLoadDone, setInitialLoadDone] = useState(false);
 
-  // (Re)load from the first page whenever the sort order changes (including on
-  // mount). Guarded against React Strict Mode's dev-only double effect
-  // invocation, which would otherwise fetch and append the first page twice
-  // (visible as duplicate images and duplicate-key warnings).
+  // Debounced so typing doesn't fire a request (and a full history re-fetch) per
+  // keystroke -- the search itself runs server-side (see below), unlike the
+  // previous client-side filter over whatever page happened to be loaded already.
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // (Re)load from the first page whenever the sort order or search query changes
+  // (including on mount). Guarded against React Strict Mode's dev-only double
+  // effect invocation, which would otherwise fetch and append the first page
+  // twice (visible as duplicate images and duplicate-key warnings).
   useEffect(() => {
     let ignore = false;
     setLoading(true);
     setError(null);
-    getHistory(PAGE_SIZE, 0, sort)
+    getHistory(PAGE_SIZE, 0, sort, debouncedQuery)
       .then((next) => {
         if (ignore) return;
         setItems(next);
@@ -106,13 +115,13 @@ export function HistoryGallery() {
     return () => {
       ignore = true;
     };
-  }, [sort]);
+  }, [sort, debouncedQuery]);
 
   const loadMore = async () => {
     setLoading(true);
     setError(null);
     try {
-      const next = await getHistory(PAGE_SIZE, offset, sort);
+      const next = await getHistory(PAGE_SIZE, offset, sort, debouncedQuery);
       setItems((prev) => [...prev, ...next]);
       setOffset((prev) => prev + next.length);
       setHasMore(next.length === PAGE_SIZE);
@@ -188,12 +197,6 @@ export function HistoryGallery() {
 
   const openSession = items.find((item) => item.session_id === openSessionId) ?? null;
 
-  const filteredItems = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((item) => item.original_prompt.toLowerCase().includes(q));
-  }, [items, query]);
-
   return (
     <div className="mx-auto flex max-w-[1120px] flex-col px-6 py-12">
       <div className="mb-11 flex items-center justify-between gap-4">
@@ -239,13 +242,13 @@ export function HistoryGallery() {
       <div className="flex flex-col gap-8">
         {error && <p className="text-sm text-red-400">{error}</p>}
 
-        {initialLoadDone && filteredItems.length === 0 && !loading ? (
+        {initialLoadDone && items.length === 0 && !loading ? (
           <p className="text-sm text-ink-muted">
-            {items.length === 0 ? "No history yet." : "No prompts match your search."}
+            {debouncedQuery ? "No prompts match your search." : "No history yet."}
           </p>
         ) : initialLoadDone ? (
           <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4">
-            {filteredItems.map((item) => {
+            {items.map((item) => {
               const thumbnail = thumbnailPath(item);
               const isRegenerating = regeneratingSessionIds.has(item.session_id);
 
@@ -336,7 +339,7 @@ export function HistoryGallery() {
           </div>
         ) : null}
 
-        {initialLoadDone && hasMore && !query && (
+        {initialLoadDone && hasMore && (
           <Button
             variant="outline"
             onClick={loadMore}

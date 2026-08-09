@@ -44,6 +44,23 @@ def test_generate_preview_rejects_missing_provider(client, auth_headers):
     assert res.status_code == 422
 
 
+def test_generate_preview_expand_prompt_failure_returns_clean_error(client, auth_headers, monkeypatch):
+    """None of the providers' expand_prompt catches its own errors -- main.py wraps
+    the call for every provider and turns any exception into a 502 instead of an
+    unhandled 500, and doesn't create a session row (nothing was generated yet)."""
+    monkeypatch.setattr(gemini, "expand_prompt", AsyncMock(side_effect=RuntimeError("boom")))
+
+    res = client.post(
+        "/api/generate/preview", json={"prompt": "a cat", "provider": "gemini"}, headers=auth_headers
+    )
+
+    assert res.status_code == 502
+    assert "boom" in res.json()["detail"]
+
+    history = client.get("/api/history", headers=auth_headers).json()
+    assert history == []
+
+
 def test_generate_preview_success(client, auth_headers, monkeypatch):
     body = create_preview_session(client, auth_headers, monkeypatch, prompt="a cat")
 

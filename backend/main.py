@@ -109,7 +109,17 @@ async def generate_preview(
 ) -> GeneratePreviewResponse:
     provider = get_provider(body.provider.value)
 
-    enhanced_prompt = await provider.expand_prompt(body.prompt)
+    # Every provider's expand_prompt can raise (SDK error, httpx error, etc.) and
+    # none of them catch it themselves -- there's nothing to save yet at this point
+    # (no session row, no images attempted), so this is a clean 502 rather than
+    # trying to record a "failed" session with no enhanced_prompt to store.
+    try:
+        enhanced_prompt = await provider.expand_prompt(body.prompt)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to expand the prompt via {body.provider.value}: {exc}",
+        ) from exc
 
     # Commit here to release the write lock before the slow generation call. Flushing
     # without committing across a long external call would hold SQLite's write
@@ -217,6 +227,7 @@ def get_history(
     limit: int = 20,
     offset: int = 0,
     sort: Literal["newest", "oldest"] = "newest",
+    q: str | None = None,
     db: DBSession = Depends(get_db),
 ) -> list[HistorySessionItem]:
     # Group all 4 previews under their session regardless of finalize state, since
@@ -227,12 +238,13 @@ def get_history(
         order_by = (GenerationSession.created_at.asc(), GenerationSession.id.asc())
     else:
         order_by = (GenerationSession.created_at.desc(), GenerationSession.id.desc())
-    session_stmt = (
-        select(GenerationSession)
-        .order_by(*order_by)
-        .limit(limit)
-        .offset(offset)
-    )
+    session_stmt = select(GenerationSession)
+    # Server-side, not client-side over the currently-loaded page: filtering only
+    # what's already in the browser would silently miss matches on unloaded pages,
+    # with no way to page further in since "Load more" paginates the unfiltered set.
+    if q:
+        session_stmt = session_stmt.where(GenerationSession.original_prompt.ilike(f"%{q}%"))
+    session_stmt = session_stmt.order_by(*order_by).limit(limit).offset(offset)
     sessions = db.scalars(session_stmt).all()
 
     previews_by_session: dict[int, list[PreviewImage]] = {s.id: [] for s in sessions}

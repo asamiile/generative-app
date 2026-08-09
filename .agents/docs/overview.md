@@ -14,7 +14,7 @@ See also: [database.md](database.md), [api.md](api.md), [screens/generate.md](sc
   - `gemini` (default): Gemini API (`google-genai` SDK, API key auth) — prompt expansion via `gemini-3.6-flash` (free tier), image generation via `gemini-3-pro-image` (Nano Banana Pro), chosen for 4K output and strong instruction-following
   - `local`: Ollama (prompt expansion, any local text model) + ComfyUI (image synthesis, SDXL-family checkpoint)
   - `openai`: OpenAI (`gpt-image-2` for images; a GPT chat model for prompt expansion)
-  - `stability`: Stability AI (Stable Image Core/SD3 for images); prompt expansion delegated to `openai` (no Stability text API)
+  - `stability`: Stability AI (Stable Image Core/SD3 for images); prompt expansion delegated to another provider via `STABILITY_TEXT_PROVIDER` (default `local`, no Stability text API)
 - Rate limiting: `slowapi`
 - Runtime: Docker / docker-compose, local only (no cloud deployment)
 
@@ -28,7 +28,7 @@ Image generation is provider-pluggable. `backend/providers/{gemini,local,openai,
 
 `sessions.provider` fixes which provider generated the 4 previews. Finalize is **independently selectable per preview** (`preview_images.final_provider`, defaults to the session's provider when omitted) — deliberately decoupled, since local CPU-only inference can be too slow/unreliable for the finalize step specifically (see below), so a session can preview locally for free and finalize with a cloud provider, or vice versa.
 
-Previews default to **square** for every provider, matching the source images they're meant to look like. Only the 4K finalize step targets **16:9** (`GEMINI_ASPECT_RATIO`, `COMFYUI_FINAL_WIDTH`/`HEIGHT`, `OPENAI_FINAL_SIZE`, `STABILITY_ASPECT_RATIO`) — Gemini and OpenAI regenerate from the reference image rather than resizing, so they can target a different aspect ratio for free. `local`'s finalize literally resizes the selected (square) preview, so the `ImageScale` node in `img2img_upscale.json` uses `crop="center"` to center-crop into 16:9 instead of stretching.
+Previews default to **square** for every provider, matching the source images they're meant to look like. The 4K finalize step targets **16:9** for three of the four providers (`GEMINI_ASPECT_RATIO`, `COMFYUI_FINAL_WIDTH`/`HEIGHT`, `OPENAI_FINAL_SIZE`) — Gemini and OpenAI regenerate from the reference image rather than resizing, so they can target a different aspect ratio for free. `local`'s finalize literally resizes the selected (square) preview, so the `ImageScale` node in `img2img_upscale.json` uses `crop="center"` to center-crop into 16:9 instead of stretching. **`stability`'s finalize stays square** — verified against a live call (2026-08-09) that its sd3 image-to-image endpoint rejects an `aspect_ratio` field outright (`400`); see `backend/providers/stability.py`'s module docstring. Reaching 16:9 for Stability would need the same pre-crop approach as `local`, not implemented.
 
 ### Provider roadmap
 
@@ -37,7 +37,7 @@ Previews default to **square** for every provider, matching the source images th
 | `gemini` (Google) | Implemented | Default. ~$0.40/full cycle (4 previews + 1 final) — see Cost notes below. |
 | `local` (Ollama + ComfyUI) | Implemented | Free, but CPU-only inference (no Docker GPU passthrough on Apple Silicon) is slow and resolution-sensitive — see below. |
 | `openai` | Implemented (2026-08-09) | `gpt-image-2`; ~$0.02-0.06/image depending on quality tier. Model IDs (`OPENAI_TEXT_MODEL`/`OPENAI_IMAGE_MODEL`) are the fastest-moving of any provider here — verify before relying on the defaults. |
-| `stability` | Implemented (2026-08-09) | Stable Image Core (previews, ~$0.03/image) + SD3 image-to-image (finalize). Prompt expansion delegated via `STABILITY_TEXT_PROVIDER` (default `local`, see above). Finalize's exact request shape is unverified against a live call — Stability's docs page didn't render for automated fetching at implementation time. |
+| `stability` | Implemented (2026-08-09) | Stable Image Core (previews, ~$0.03/image) + SD3 image-to-image (finalize). Prompt expansion delegated via `STABILITY_TEXT_PROVIDER` (default `local`, see above). Finalize verified against a live call (2026-08-09) — the initial `aspect_ratio` param was rejected outright (`400`) and removed; finalize output is square, unlike the other three providers (see Providers above). |
 | Adobe Firefly | Rejected | Evaluated 2026-08-08: API access requires a separate Enterprise agreement (~$1,000/month minimum via Adobe Sales) that the consumer Creative Cloud Photography plan does not unlock — not viable for this project's scale. |
 
 **`local` provider** (`backend/providers/local.py`):

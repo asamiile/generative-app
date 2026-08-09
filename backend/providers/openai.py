@@ -16,6 +16,7 @@ import os
 
 import httpx
 
+from providers._http import request_with_retry
 from providers._storage import BACKEND_ROOT, save_image_bytes
 from providers.prompts import NEGATIVE_PROMPT, SYSTEM_PROMPT
 
@@ -49,18 +50,22 @@ def _get_http_client() -> httpx.AsyncClient:
 
 async def expand_prompt(user_prompt: str) -> str:
     client = _get_http_client()
-    response = await client.post(
-        f"{OPENAI_BASE_URL}/chat/completions",
-        json={
-            "model": OPENAI_TEXT_MODEL,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                # Treat user input as data, not instructions (prompt injection
-                # defense), matching providers/gemini.py and providers/local.py.
-                {"role": "user", "content": f'User input: """{user_prompt}"""'},
-            ],
-        },
+    response = await request_with_retry(
+        lambda: client.post(
+            f"{OPENAI_BASE_URL}/chat/completions",
+            json={
+                "model": OPENAI_TEXT_MODEL,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    # Treat user input as data, not instructions (prompt injection
+                    # defense), matching providers/gemini.py and providers/local.py.
+                    {"role": "user", "content": f'User input: """{user_prompt}"""'},
+                ],
+            },
+        )
     )
+    # Left uncaught -- main.py wraps the expand_prompt call for every provider and
+    # turns any exception into a clean 502 instead of session creation failing silently.
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"].strip()
 
@@ -76,14 +81,16 @@ async def generate_preview_batch(enhanced_prompt: str) -> list[str | None]:
     supports n>1 (multiple candidates per request) natively."""
     client = _get_http_client()
     try:
-        response = await client.post(
-            f"{OPENAI_BASE_URL}/images/generations",
-            json={
-                "model": OPENAI_IMAGE_MODEL,
-                "prompt": enhanced_prompt + _negative_prompt_suffix(),
-                "n": PREVIEW_COUNT,
-                "size": OPENAI_PREVIEW_SIZE,
-            },
+        response = await request_with_retry(
+            lambda: client.post(
+                f"{OPENAI_BASE_URL}/images/generations",
+                json={
+                    "model": OPENAI_IMAGE_MODEL,
+                    "prompt": enhanced_prompt + _negative_prompt_suffix(),
+                    "n": PREVIEW_COUNT,
+                    "size": OPENAI_PREVIEW_SIZE,
+                },
+            )
         )
         response.raise_for_status()
     except httpx.HTTPError:
@@ -107,15 +114,17 @@ async def generate_final_image(enhanced_prompt: str, reference_image_path: str) 
     reference_path = BACKEND_ROOT / reference_image_path.lstrip("/")
 
     try:
-        response = await client.post(
-            f"{OPENAI_BASE_URL}/images/edits",
-            data={
-                "model": OPENAI_IMAGE_MODEL,
-                "prompt": enhanced_prompt + _negative_prompt_suffix(),
-                "size": OPENAI_FINAL_SIZE,
-                "n": "1",
-            },
-            files={"image": (reference_path.name, reference_path.read_bytes(), "image/png")},
+        response = await request_with_retry(
+            lambda: client.post(
+                f"{OPENAI_BASE_URL}/images/edits",
+                data={
+                    "model": OPENAI_IMAGE_MODEL,
+                    "prompt": enhanced_prompt + _negative_prompt_suffix(),
+                    "size": OPENAI_FINAL_SIZE,
+                    "n": "1",
+                },
+                files={"image": (reference_path.name, reference_path.read_bytes(), "image/png")},
+            )
         )
         response.raise_for_status()
     except httpx.HTTPError:

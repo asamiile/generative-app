@@ -79,10 +79,11 @@ export function getHistory(
   limit = 20,
   offset = 0,
   sort: HistorySort = "newest",
+  q?: string,
 ): Promise<HistorySessionItem[]> {
-  return apiFetch<HistorySessionItem[]>(
-    `/api/history?limit=${limit}&offset=${offset}&sort=${sort}`,
-  );
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset), sort });
+  if (q) params.set("q", q);
+  return apiFetch<HistorySessionItem[]>(`/api/history?${params.toString()}`);
 }
 
 export function getAvailableProviders(): Promise<Provider[]> {
