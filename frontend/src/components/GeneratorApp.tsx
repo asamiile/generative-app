@@ -234,6 +234,18 @@ export function GeneratorApp() {
     }
   };
 
+  // Clears the generated previews only -- leaves the prompt textarea alone, so
+  // starting over with a tweaked version of the same prompt doesn't require
+  // retyping it. Without this, the only way to get rid of a set of previews you
+  // don't want to look at anymore was to generate a new set on top of them.
+  const handleClear = () => {
+    setError(null);
+    setPreview(null);
+    setFinalizeProviderByPreview({});
+    setRetryProviderByPreview({});
+    setPhase("idle");
+  };
+
   return (
     <div className="mx-auto flex max-w-[760px] flex-col gap-11 px-6 py-12">
       <h1 className="text-[32px] font-semibold leading-[1.1] tracking-[-0.025em] text-ink-primary">
@@ -272,7 +284,17 @@ export function GeneratorApp() {
 
       {preview && (
         <section className="flex flex-col gap-5">
-          <h2 className="text-lg font-semibold text-ink-primary">Choose a preview</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-ink-primary">Choose a preview</h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClear}
+              disabled={anyPreviewActionBusy}
+            >
+              Clear
+            </Button>
+          </div>
           <div className="grid grid-cols-2 gap-4">
             {preview.previews.map((p) => (
               <PreviewTile
