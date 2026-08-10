@@ -1,8 +1,10 @@
-# Screen: Generate (`/`)
+# Screen: Generate > Image (`/generate/image`)
 
 Component: [frontend/src/components/GeneratorApp.tsx](../../../frontend/src/components/GeneratorApp.tsx), tiles rendered via the shared [PreviewTile.tsx](../../../frontend/src/components/PreviewTile.tsx) (also used by [History](history.md)'s session modal).
 
-The default landing screen. One prompt → 4 previews → pick one to finish in 4K, all in a single-session flow (no persistence of in-progress state across reloads beyond the resume-on-navigate marker below — completed sessions show up in [History](history.md) afterward).
+Under the sidebar's "Generate" section (`frontend/src/components/Nav.tsx`) — currently the only entry there, since image is the only generation type implemented (see [overview.md](../overview.md)'s note on the repo's name). `/` itself is now the (currently empty, placeholder) Dashboard screen, not this one.
+
+One prompt → 4 previews → pick one to finish in 4K, all in a single-session flow (no persistence of in-progress state across reloads beyond the resume-on-navigate marker below — completed sessions show up in [History](history.md) afterward).
 
 ## States
 

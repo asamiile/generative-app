@@ -9,7 +9,7 @@ still work" pass, not exhaustive.
 `local`), so the cross-provider fallback case (below) is actually testable. `docker
 compose up`, then open [http://localhost:3000](http://localhost:3000).
 
-## 1. Individual retry — Generate screen (`/`)
+## 1. Individual retry — Generate screen (`/generate/image`)
 
 1. Enter a prompt, pick a provider, click "Generate previews".
 2. Once the 4 tiles appear, force one to fail — easiest way is to temporarily set a
@@ -22,12 +22,12 @@ compose up`, then open [http://localhost:3000](http://localhost:3000).
 5. **Expected**: the tile switches to the new image, its badge now shows the new
    provider, and the other 3 tiles are untouched.
 
-## 2. Individual retry — History screen (`/history` modal)
+## 2. Individual retry — History screen (`/generate/image/history` modal)
 
 1. Open a past session that has at least one failed preview (or produce one via step 1
-   above, then navigate to `/history`).
+   above, then navigate to `/generate/image/history`).
 2. Click the card to open the session modal.
-3. **Expected**: same three-state tile rendering as `/` (finalized / success+Generate 4K
+3. **Expected**: same three-state tile rendering as `/generate/image` (finalized / success+Generate 4K
    / failed+Retry) — this is the shared `PreviewTile` component, so behavior should be
    identical to section 1.
 4. Retry the failed tile with a provider left at its default (don't touch the dropdown).
@@ -38,7 +38,7 @@ compose up`, then open [http://localhost:3000](http://localhost:3000).
 
 1. Get a session where **all 4** previews failed (temporarily break every configured
    provider's key, generate once, then restore the keys).
-2. On `/history`, the card should be non-interactive ("Generation failed" + a provider
+2. On `/generate/image/history`, the card should be non-interactive ("Generation failed" + a provider
    dropdown + "Regenerate" button, no click-to-open).
 3. Click Regenerate.
 4. **Expected**: the *same* card updates in place (compare the thumbnail/prompt) —
@@ -65,7 +65,7 @@ trusting the pytest coverage.
   top-left corner: the finalize provider once finalized, otherwise the preview's own
   generating provider.
 - After doing a mixed-provider retry (section 4), open that session's card in
-  `/history` and confirm the grid thumbnail's badge matches whichever image was
+  `/generate/image/history` and confirm the grid thumbnail's badge matches whichever image was
   actually picked as the thumbnail (finalized image takes priority — see
   `pickThumbnail` in [../docs/screens/history.md](../docs/screens/history.md)), not
   necessarily the session's original provider.

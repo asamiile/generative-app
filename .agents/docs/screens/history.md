@@ -1,4 +1,4 @@
-# Screen: History (`/history`)
+# Screen: Generate > Image History (`/generate/image/history`)
 
 Components: [frontend/src/components/HistoryGallery.tsx](../../../frontend/src/components/HistoryGallery.tsx), [HistorySessionModal.tsx](../../../frontend/src/components/HistorySessionModal.tsx), tiles inside the modal rendered via the shared [PreviewTile.tsx](../../../frontend/src/components/PreviewTile.tsx) (also used by [Generate](generate.md)).
 
