@@ -55,6 +55,20 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
+  # Read-only SQLite browser for history.db, with a SQL query box for ad-hoc
+  # filtering (e.g. narrowing down prompts) -- see .agents/docs/overview.md.
+  sqlite-web:
+    build: ./sqlite-web
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # :ro so a bug in sqlite-web (or anything using this mount) can never
+      # touch the actual DB the app depends on -- on top of the -r/--read-only
+      # flag (sqlite-web/Dockerfile) that keeps its own SQL execution read-only.
+      - backend_data:/data:ro
+    depends_on:
+      - backend
+
   frontend:
     build:
       context: ./frontend
@@ -65,6 +79,7 @@ services:
     environment:
       - BACKEND_API_URL=http://backend:8000
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_SQLITE_WEB_URL=http://localhost:8080
     ports:
       - "127.0.0.1:3000:3000"
     volumes:

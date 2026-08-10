@@ -45,7 +45,7 @@ At least one provider needs to be configured — pick one from the table above a
    ```bash
    docker compose up --build
    ```
-6. Open [http://localhost:3000](http://localhost:3000), pick your model in the app, and generate an image.
+6. Open [http://localhost:3000/generate/image](http://localhost:3000/generate/image) (via the sidebar's Generate > Image), pick your model in the app, and generate an image.
 
 ### Gemini API setup
 
@@ -116,6 +116,7 @@ docker compose exec --user root comfyui chown -R appuser:appuser /app/models /ap
 | Frontend (Next.js)       | http://localhost:3000        | 3000  |
 | API (FastAPI)            | http://localhost:8000        | 8000  |
 | API Docs (Swagger UI)    | http://localhost:8000/docs   | 8000  |
+| Database browser (sqlite-web) | http://localhost:8080   | 8080  |
 | Ollama (local provider)  | http://localhost:11435       | 11435 |
 | ComfyUI (local provider) | http://localhost:8188        | 8188  |
 
@@ -143,6 +144,18 @@ docker compose logs -f
 # Stop
 docker compose down
 ```
+
+### Database browser
+
+[sqlite-web](https://github.com/coleifer/sqlite-web) is available at [http://localhost:8080](http://localhost:8080) (also linked from the app's sidebar under "Database") for browsing `history.db` and running ad-hoc SQL, e.g. to filter sessions by prompt, from its "Query" tab:
+
+```sql
+select id, original_prompt, provider, created_at from sessions
+where original_prompt like '%mountain%'
+order by created_at desc
+```
+
+Read-only: the volume is mounted `:ro` and the container runs sqlite-web with `-r`/`--read-only` (`sqlite-web/Dockerfile`), so write queries (INSERT/UPDATE/DELETE) are rejected even though sqlite-web supports them by default.
 
 ### Database migrations
 

@@ -89,19 +89,24 @@ generative-app/
 │   └── Dockerfile
 ├── comfyui/                     # ComfyUI container (built from source, non-root)
 │   └── Dockerfile
+├── sqlite-web/                  # Read-only SQLite browser for history.db (see Containers below)
+│   └── Dockerfile
 └── frontend/                   # Next.js frontend
     ├── Dockerfile
     ├── src/
     │   ├── app/
-    │   │   ├── page.tsx            # "/" Generate screen
-    │   │   ├── history/page.tsx    # "/history" History screen
+    │   │   ├── page.tsx                  # "/" Dashboard screen
+    │   │   ├── generate/image/page.tsx           # "/generate/image" Generate screen (see screens/generate.md)
+    │   │   ├── generate/image/history/page.tsx   # "/generate/image/history" History screen (see screens/history.md)
     │   │   ├── layout.tsx
-    │   │   └── api/                 # BFF route handlers (proxy to the backend, attach APP_API_TOKEN)
+    │   │   └── api/                       # BFF route handlers (proxy to the backend, attach APP_API_TOKEN)
     │   ├── components/               # UI components
     │   └── lib/                        # api.ts (backend client), backendFetch.ts (extended-timeout fetch)
     ├── package.json
-    └── .env.local                       # NEXT_PUBLIC_API_URL, BACKEND_API_URL, APP_API_TOKEN
+    └── .env.local                       # NEXT_PUBLIC_API_URL, BACKEND_API_URL, APP_API_TOKEN, NEXT_PUBLIC_SQLITE_WEB_URL
 ```
+
+The sidebar nav (`frontend/src/components/Nav.tsx`) groups routes as Dashboard / **Generate** (section: currently **Image** and **Image History**) / Database (external link to sqlite-web). The `/generate/{type}` and `/generate/{type}/history` shape (rather than flat `/` and `/history`) is deliberate: this repo may grow generation types beyond images (see the top of this doc), and each would get its own `/generate/{type}` + `/generate/{type}/history` route pair and sidebar entries under the same "Generate" section, rather than a flat list of unrelated top-level routes or a single history view mixing unrelated generation types together.
 
 ## Security
 
@@ -116,7 +121,8 @@ generative-app/
 - `frontend/Dockerfile`: multi-stage build; dev target used by `docker-compose.yml` runs `next dev` with source bind-mounted for hot reload.
 - `ollama/Dockerfile`: wraps the official `ollama/ollama:latest` image (which runs as root) with a non-root `appuser`, since every container in this project must be non-root.
 - `comfyui/Dockerfile`: `python:3.12-slim` + `git clone` of ComfyUI, non-root `appuser`. No GPU is baked in — see docker-compose.yml's commented-out NVIDIA passthrough block for Linux; Docker Desktop on Apple Silicon has no GPU passthrough at all, so local image generation falls back to (slow) CPU.
-- `docker-compose.yml`: four services (`backend`, `frontend`, `ollama`, `comfyui`). `history.db`, `static/images/`, and the Ollama/ComfyUI model directories live in named volumes so data survives container recreation. Ports bind to `127.0.0.1` only. `.env` files are loaded via `env_file`, never baked into the image.
+- `sqlite-web/Dockerfile`: wraps the official `ghcr.io/coleifer/sqlite-web:latest` image (which runs as root) with a non-root `appuser`, matching this project's non-root convention. Runs with `-r`/`--read-only`, and mounts `backend_data` read-only (`:ro` in docker-compose.yml), so it can never write to `history.db` even though sqlite-web supports INSERT/UPDATE/DELETE by default. Exists to browse the DB and run ad-hoc SQL (e.g. filtering sessions by prompt) without building a custom admin UI — see [README.md](../../README.md).
+- `docker-compose.yml`: five services (`backend`, `frontend`, `ollama`, `comfyui`, `sqlite-web`). `history.db`, `static/images/`, and the Ollama/ComfyUI model directories live in named volumes so data survives container recreation. Ports bind to `127.0.0.1` only. `.env` files are loaded via `env_file`, never baked into the image.
 - ComfyUI's checkpoint (`COMFYUI_CHECKPOINT`) is a multi-GB file not included in the image or repo — it must be manually downloaded into the `comfyui_models` volume post-build (see [README.md](../../README.md)). No separate upscale model is needed; finalize resizes directly instead of running a 4x AI upscale model (see [Providers](#providers)).
 
 ## Cost notes
