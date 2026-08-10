@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0](https://github.com/asamiile/generative-app/compare/v0.2.0...v0.3.0) (2026-08-10)
+
+
+### Features
+
+* add SQLite web browser for history.db and update navigation str… ([370bb1e](https://github.com/asamiile/generative-app/commit/370bb1e58e344c417b26494482babbe17721b213))
+* add SQLite web browser for history.db and update navigation structure ([89efbed](https://github.com/asamiile/generative-app/commit/89efbedabc9afc1f3705422ba7395e1ecd6c5984))
+* implement retry functionality for previews and update finalize logic ([55d3083](https://github.com/asamiile/generative-app/commit/55d3083693b34bd3d625269fd5cb0915f318fb11))
+* update logo SVG in Nav component for improved design ([39a8599](https://github.com/asamiile/generative-app/commit/39a85991b10777236166567dbaea04ce957d2181))
+
 ## [0.2.0](https://github.com/asamiile/generative-app/compare/v0.1.0...v0.2.0) (2026-08-08)
 
 
