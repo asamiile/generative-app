@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/asamiile/generative-app/compare/v0.3.0...v0.3.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* use undici's own fetch for backendFetch's long-timeout dispatcher ([101bc62](https://github.com/asamiile/generative-app/commit/101bc626acec51d6041fa271b1bfe2a6f928562d))
+* use undici's own fetch for backendFetch's long-timeout dispatcher ([674199a](https://github.com/asamiile/generative-app/commit/674199af9f641d743f20c5c31000e460bbbb7872))
+
 ## [0.3.0](https://github.com/asamiile/generative-app/compare/v0.2.0...v0.3.0) (2026-08-10)
 
 
